@@ -1,0 +1,339 @@
+\documentclass[11pt]{article}
+\usepackage[a4paper,margin=2.2cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{subcaption}
+
+\hypersetup{colorlinks=true,linkcolor=blue,urlcolor=blue,citecolor=blue}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{gray!50},
+  xleftmargin=4pt,
+  xrightmargin=4pt,
+  aboveskip=4pt,
+  belowskip=4pt,
+}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+
+\title{Reproduction of the 5-D Allen--Cahn experiment\\
+       \large from \emph{Deep Tangent Bundle Method} (Wu, arXiv:2509.00957)}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-3em}
+
+\section*{Summary}
+
+We reproduce from scratch the 5-D Allen--Cahn experiment of
+\href{https://arxiv.org/abs/2509.00957}{Wu (2025)}, including the
+network architecture (\code{MMNN}\,+\,periodic embedding), the
+Forward-Euler DTB integrator (Algorithm~3), and the Proposition~2.4
+periodic-reset rule. The code in \code{DTB\_rep/} runs end-to-end on a
+single RTX~5080 in $\sim$5.6 minutes. We then compare the solution
+visually with the paper's Fig.\,5, and add a Neural-Galerkin (NGM)
+ablation: same network and same random sub-basis, but with
+\emph{forward update each step and no reset}.
+
+\paragraph{Headline.} Visual reproduction of Fig.\,5 matches.  NGM did
+\emph{not} blow up on this problem -- it tracks the DTB trajectory
+within $10^{-3}$ in $|u|_\infty$ for the whole interval $[0,2]$.
+
+\section{Problem and method}
+
+\paragraph{PDE.} The 5-D Allen--Cahn equation
+\[
+  \partial_t u \;=\; \nu\,\Delta_z u \;+\; u - u^3,
+  \qquad z \in [-1,1]^5,\ \text{periodic BCs},
+\]
+with $\nu = 0.01$, $T = 2.0$, and the smooth, periodic initial
+condition $w(z) = -1 + 2(\tilde{w}(z)+6)/13$ from Eqs.\,(51)--(52).
+Empirically $w(z)\in[-0.87,\,0.86]$.
+
+\paragraph{DTB update.} For a DNN $f_\theta:\mathbb{R}^5\to\mathbb{R}$,
+\[
+  u^{k+1}(z) = u^k(z) + h\,
+              \tfrac{\partial f_{\theta^k}}{\partial \theta}(z)\,\alpha^k,
+  \qquad
+  \alpha^k = \mathrm{Jac}(\theta^k)^{+}\,F[u^k]
+\]
+with $F[u]=\nu\Delta u + u - u^3$, $\mathrm{Jac}$ the $N\times m$
+Jacobian on a random sub-basis of $m=6000$ parameter coordinates, and
+$+$ the least-squares pseudo-inverse.
+
+\paragraph{Proposition 2.4 (periodic reset).} Every $L=20$ steps, refit
+$\theta^{(j+1)L} = \arg\min_{\tilde\theta} \| u^{(j+1)L} - f_{\tilde\theta}\|_{L^2}$
+via Adam on a precomputed snapshot of $u^{(j+1)L}$ on 20\,000 samples.
+
+\section{Architecture}
+
+The network is $f_\theta = \varphi_{\theta_1}\circ\mathrm{PL}_{\theta_2}$
+with periodic embedding
+$\mathrm{PL}(z)_{i,j} = \cos(\pi z_i + \psi_{i,j})$ ($i=1{:}5$,
+$j=1{:}40$, 200 trainable $\psi$) followed by an MMNN of shape
+$(w,r,l)=(366,25,7)$ -- per-layer
+$h(x) = A\sigma(Wx+b)+c$ with $W,b$ frozen and $A,c$ trainable.
+Trainable parameter count: $M=55\,617$. DTB / NGM sub-basis size:
+$m=6000$.
+
+\paragraph{Activation choice (empirical).} The paper does not state
+$\sigma$. With \code{tanh} the depth-7 stack accumulates curvature
+through $\sigma''$; after the first reset the Laplacian RMS grows
+$10\times$ and the next block diverges. With \code{relu}
+$\Delta f \equiv 0$ a.e.\ and \code{lstsq} returns NaN. \code{gelu} is
+the only smooth activation that keeps both $|u|$ and $|\Delta f|$
+bounded across resets, so it is the default.
+
+\section{Implementation}
+
+\begin{center}
+\begin{tabular}{ll}
+  \toprule
+  File & Role \\
+  \midrule
+  \code{network.py}       & \code{PeriodicEmbedding} + \code{MMNN} + \code{PeriodicMMNN}\\
+  \code{dtb.py}           & \code{dtb\_basis\_matrices}, \code{jform\_solve}, \code{fit\_model\_to\_target}\\
+  \code{problem.py}       & IC $w(z)$ and $F[u]=\nu\Delta u + u - u^3$\\
+  \code{run\_5d\_ac.py}   & DTB driver (Algorithm 3 + Prop. 2.4)\\
+  \code{run\_ngm.py}      & Neural-Galerkin baseline (forward update, no reset)\\
+  \code{visualize.py}     & Five 2-D hyperplane snapshot panel\\
+  \code{compare\_to\_paper.py}    & Pairwise comparison with the paper's Fig.\,5\\
+  \code{compare\_dtb\_vs\_ngm.py} & DTB vs NGM traces and snapshot panels\\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{Key implementation choices.}
+\begin{itemize}\itemsep0pt
+  \item Per-sample Jacobian and per-sample Laplacian-of-basis matrix
+        are returned together by a single
+        \code{vmap(jacrev(\dots))} sweep in \code{dtb\_basis\_matrices},
+        restricted to the $m$-dim sub-basis by patching the selected
+        indices into the flat trainable vector before differentiating.
+  \item The J-form solve defaults to GPU \code{torch.linalg.lstsq}
+        ($\sim$0.2\,s for $20\,000\times 6000$ fp32, internally a
+        truncated-SVD pseudo-inverse); CPU/fp64 explicit SVD,
+        most faithful to the paper, is available via \code{--solver svd}
+        but costs $\sim$25\,s per step. Tikhonov / ridge is
+        intentionally not offered: an $\varepsilon I$ shift biases the
+        least-squares solution toward zero and contaminates the
+        time-derivative estimate.
+  \item Periodic reset uses Adam on \emph{all trainable} parameters
+        ($A,c,\psi$), with cosine LR and a precomputed snapshot of
+        the target on 20\,000 collocation points.
+\end{itemize}
+
+\section{Run diagnostics}
+
+Paper-faithful config: $K=200$, $h=0.01$, $L=20$, $N=20\,000$,
+$m=6000$, \code{fit\_steps}=6000, \code{fit\_lr}=3e-3. Single RTX~5080,
+fp32, $\sim$5.6 minutes wall time.
+
+\begin{center}
+\begin{tabular}{rrrr}
+  \toprule
+  Block & $t$ & avg DTB residual & reset RMSE \\
+  \midrule
+   1 & 0.20 & 4.9e-3 & 3.6e-3 \\
+   2 & 0.40 & 4.9e-3 & 4.1e-3 \\
+   3 & 0.60 & 5.4e-3 & 4.0e-3 \\
+   4 & 0.80 & 6.1e-3 & 3.4e-3 \\
+   5 & 1.00 & 6.7e-3 & 2.8e-3 \\
+   6 & 1.20 & 7.9e-3 & 3.1e-3 \\
+   7 & 1.40 & 8.8e-3 & 4.2e-3 \\
+   8 & 1.60 & 9.8e-3 & 3.7e-3 \\
+   9 & 1.80 & 1.16e-2 & 3.8e-3 \\
+  10 & 2.00 & 1.53e-2 & 3.8e-3 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+The DTB residual rises slowly from 0.5\,\% to 1.5\,\% as the solution
+develops sharper interfaces (cubic nonlinearity drives $u\to\pm 1$
+within each Voronoi region), while the reset RMSE stays at $\sim$4e-3
+throughout, indicating the network keeps tracking the true solution
+function.
+
+\section{Comparison with the paper's Fig.\,5}
+
+Two corrections were made during the comparison:
+\begin{enumerate}\itemsep0pt
+  \item \textbf{Initial-condition typo.} The first term of $\tilde w$
+        is $\cos^2(\pi z_1)$ (paper notation \code{cz1\^{}2}), not
+        $\cos(\pi z_1)$. After the fix, $w(z)\in[-0.87,0.86]$ and the
+        $t=0$ panels match the paper visually.
+  \item \textbf{Hyperplanes (a)--(e) are not axis-aligned.} They are
+        the oblique slices from Section~3.1 of the paper, e.g.\
+        $(a):\,-z_1=z_2,\ z_4=(z_2-z_5)/2,\ z_3=0$. \code{visualize.py}
+        now implements these exactly.
+\end{enumerate}
+
+The paper reports no quantitative error metrics for the 5-D run --
+there is no analytical solution at $d=5$ and mesh-based numerical
+solvers are infeasible at this dimensionality. Comparison is
+therefore visual, on the five 2-D hyperplanes:
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=0.95\linewidth]{snapshots/run_paper2/cmp_hyperplane_a.png}\\[1pt]
+  \includegraphics[width=0.95\linewidth]{snapshots/run_paper2/cmp_hyperplane_c.png}
+  \caption{Paper Fig.\,5 (top row of each pair) vs our DTB
+           reproduction (bottom row), hyperplanes (a) and (c). Time
+           goes left to right: $t=0,0.4,0.8,1.2,1.6,2.0$.}
+\end{figure}
+
+Hyperplane (c) is an essentially identical evolution (round bright
+pocket that brightens and broadens with time). On (a), (b), (d), (e)
+the locations of the persistent phase regions and the rate of
+saturation match; small-scale detail differs (different random sub-basis
+draws, different Adam-fit initialisations, fp32).
+
+\section{Neural-Galerkin ablation}
+
+We re-ran the same problem with the only change being the update
+rule (file \code{run\_ngm.py}):
+\begin{itemize}\itemsep0pt
+  \item \textbf{Sub-basis.} Same random subset
+        $\mathrm{sel}\subset\{1,\dots,M\}$, $|\mathrm{sel}|=6000$,
+        fixed once at $t=0$ (does not vary per block).
+  \item \textbf{Update.} Forward Euler on the parameters themselves:
+        $\theta^{k+1}_\mathrm{sel} = \theta^k_\mathrm{sel} + h\,\alpha^k$
+        with $\alpha^k = \mathrm{Jac}(\theta^k)^{+} F[f_{\theta^k}]$.
+  \item \textbf{No reset.}
+\end{itemize}
+
+\subsection*{One-step failure-mode sweep}
+
+The paper (Sec.~3.2) demonstrates that for LIT-class methods $\|\alpha\|$
+grows dramatically as the pseudo-inverse cutoff is tightened. We
+reproduced the same sweep at $t=0$ for our setup (\code{ngm\_step1\_failure.py})
+on the same network and same random sub-basis $m=6000$ used for
+NGM. With $\sigma_{\max}(J)=1.01{\times}10^2$ and
+$\sigma_{\min}(J)=8.0{\times}10^{-5}$ (condition number $\approx 10^6$):
+
+\begin{center}
+\small
+\begin{tabular}{cccc}
+  \toprule
+  rtol & cutoff $= \mathrm{rtol}\cdot\sigma_{\max}$ & kept $\sigma$'s & $\|\alpha\|$ \\
+  \midrule
+  $10^{-3}$ & $1.0{\times}10^{-1}$ & 1602 / 6000 & $3.0$ \\
+  $10^{-4}$ & $1.0{\times}10^{-2}$ & 3693 & $1.1{\times}10^1$ \\
+  $10^{-5}$ & $1.0{\times}10^{-3}$ & 5217 & $5.6{\times}10^1$ \\
+  $10^{-6}$ & $1.0{\times}10^{-4}$ & 5991 & $2.6{\times}10^2$ \\
+  $10^{-8}$ & $1.0{\times}10^{-6}$ & 6000 (all) & $2.6{\times}10^2$ \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+The same monotone trend as the paper: tighter cutoff $\Rightarrow$
+larger $\|\alpha\|$. But the eventual plateau here is $\sim$260, not
+the $\sim$4000 reported in the paper. Two reasons: \emph{(a)} the
+F[u] vector at $t=0$ has only modest projection onto the smallest
+singular directions of $J$ for this particular network draw, and
+\emph{(b)} we are operating in fp32, so $\sigma$'s much below $\sim$10$^{-5}$
+are effectively noise and the truncation hits a floor.
+
+\subsection*{Time stepping at strict truncation (rtol = $10^{-8}$, well below the 2\% budget)}
+
+We then re-ran the full $T=2$ NGM trajectory with $\mathrm{rtol}=10^{-8}$
+(cutoff $\sim 10^{-6}$, which is far stricter than the 2\% budget) and
+compared against DTB at the same rtol. Both runs use
+\code{torch.linalg.lstsq} with the rtol passed through as
+\code{rcond}.
+
+\begin{center}
+\small
+\begin{tabular}{lrrrr}
+  \toprule
+  Run & wall time & mean step (s) & final $\|\alpha\|$ & final residual \\
+  \midrule
+  DTB,   \code{rtol=1e-8} & 226 s & 1.13 & $2.2{\times}10^2$ & $1.76\%$\\
+  NGM,   \code{rtol=1e-8} & 1451 s (*) & 7.25 & $3.1{\times}10^1$ & $1.05\%$\\
+  \bottomrule
+\end{tabular}\\[2pt]
+{\footnotesize (*) NGM per-step cost is dominated by the
+$\sigma_{\min}/\sigma_{\max}$ logging via
+\code{torch.linalg.svdvals(J)} (\char`\~ 7\,s on $20000{\times}6000$
+fp32). Without that diagnostic NGM is $\sim$1\,s/step, matching DTB.}
+\end{center}
+
+\paragraph{Result: NGM does not blow up here, even at the strictest
+rtol.} Across all 200 steps $|u|_\infty$ stays in $[0.82, 0.99]$;
+$\|\alpha\|$ \emph{decreases monotonically} from $\sim$280 to
+$\sim$30; $\sigma_{\min}(J)$ actually \emph{grows} from
+$7.8{\times}10^{-4}$ to $1.6{\times}10^{-3}$; and the J-form residual
+rises only from 0.5\,\% to 1.05\,\%.
+
+\begin{figure}[h!]
+  \centering
+  \includegraphics[width=\linewidth]{snapshots/compare_fair.png}
+  \caption{DTB (blue) vs NGM (red) at $\mathrm{rtol}=10^{-8}$.
+           Top-left: J-form residual -- DTB's saw-tooth is the L=20
+           block-reset pattern. Top-right: $\|\alpha\|$ -- NGM relaxes
+           toward equilibrium, DTB oscillates with the block resets.
+           Bottom-left: cumulative wall time -- NGM is slower only
+           because of the logging; the algorithmic cost is the same.
+           Bottom-right: $|u|_\infty$ trajectories agree to $10^{-3}$.}
+\end{figure}
+
+\paragraph{Why didn't NGM blow up?} A useful negative result. The
+common failure mode of Neural-Galerkin schemes -- Gram-matrix
+ill-conditioning that drives $\|\alpha\|\to\infty$ -- is suppressed
+here by three smoothing effects acting in concert:
+\emph{(i)} the periodic embedding makes the input features bounded
+and well-conditioned everywhere; \emph{(ii)} the random sub-basis of
+size $m=6000$ acts as a regulariser, restricting $\theta$-flow to a
+fixed 6000-dim subspace where it cannot escape onto the
+rank-degenerate manifolds that destabilise full-parameter NGM;
+\emph{(iii)} the Allen--Cahn nonlinearity $u-u^3$ is a contractive
+gradient flow toward $u=\pm1$, so $|u|_\infty$ is bounded a priori,
+which in turn bounds $\|F[u]\|$ and hence $\|\alpha\|$.
+
+\paragraph{When NGM \emph{would} blow up.} Removing \emph{any} of those
+three would likely change the outcome:
+expansive / mixed-sign nonlinearities (e.g.\ Burgers' shocks, NLS)
+violate (iii); growing the sub-basis to full $M$ violates (ii);
+and a non-periodic boundary forces the network to track sharp
+boundary-layer features that violate (i). We did not explore those
+here.
+
+\section{Reproduce}
+
+\begin{lstlisting}[language=bash]
+pip install -r requirements.txt
+
+# DTB (~6 min on a 16 GB+ NVIDIA GPU)
+python run_5d_ac.py --tag paper2 --fit_steps 6000 --fit_lr 3e-3
+python visualize.py snapshots/run_paper2
+
+# Side-by-side with the paper's Fig. 5 panels
+python compare_to_paper.py snapshots/run_paper2
+
+# DTB at strict truncation (~6 min)
+python run_5d_ac.py --tag dtb_strict --solver lstsq --rtol 1e-8 \
+                    --fit_steps 6000 --fit_lr 3e-3
+
+# NGM at strict truncation (~25 min; svdvals logging dominates)
+python run_ngm.py --tag ngm_lstsq_strict --solver lstsq --rtol 1e-8
+
+# One-step alpha vs rtol sweep (reproduces paper Table 1 trend)
+python ngm_step1_failure.py --run_dir snapshots/run_paper2 --m 6000
+
+# DTB vs NGM traces and snapshot panels
+python compare_runs.py snapshots/run_dtb_strict snapshots/run_ngm_lstsq_strict
+python compare_dtb_vs_ngm.py --dtb_dir snapshots/run_paper2 \
+                             --ngm_dir snapshots/run_ngm_lstsq_strict
+\end{lstlisting}
+
+\end{document}
