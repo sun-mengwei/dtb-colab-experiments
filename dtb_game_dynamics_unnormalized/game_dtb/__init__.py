@@ -3,7 +3,7 @@
 from .algorithm import DTBConfig, NeuralDTBGameDynamics
 from .games import cournot_duopoly_drift, linear_quadratic_drift
 from .models import TangentMLP
-from .state import ParticleState, gaussian_particle_state
+from .state import ParticleState, gaussian_particle_state, uniform_box_particle_state
 
 __all__ = [
     "DTBConfig",
@@ -13,4 +13,5 @@ __all__ = [
     "cournot_duopoly_drift",
     "gaussian_particle_state",
     "linear_quadratic_drift",
+    "uniform_box_particle_state",
 ]

@@ -1,168 +1,191 @@
-# Unnormalized Neural–DTB for Distributional Game Dynamics
+# Neural–DTB Replication of a 2D Non-Potential Game
 
-This standalone project implements the algorithm in
-`dtb_game_dynamics_unnormalized_dimensions.tex`. It transports particles,
-their log density, and their score under a game drift plus diffusion:
+This self-contained folder implements the supplied unnormalized Neural–DTB
+algorithm and uses it to reproduce the qualitative behavior of target Figures
+4.2 and 4.3: strategy samples contract toward the stable Nash equilibrium
+`(0.5,0.5)` from uniform and Gaussian initial distributions.
 
-\[
-v_k(x_i)=b(x_i)-\tfrac12Dq_i,
-\qquad
-u_k(x)=J_{k,S_k}(x)\alpha_k.
-\]
+The supplied mathematical source and target screenshot are kept beside the
+code in [`references/`](references/README.md):
 
-The coefficient is the relative truncated-SVD solution of the **unnormalized**
-stacked system. No `1/N` or `1/sqrt(N)` factor is applied.
+![Target Figures 4.2 and 4.3](references/target_figures_4_2_4_3.png)
 
-The implementation is separate from the original Deep Tangent Bundle code.
-It reuses selected ideas and small utilities from
-[`DTB_rep/dtb.py`](https://github.com/sun-mengwei/dtb-colab-experiments/blob/main/DTB_rep/dtb.py)
-and the Cournot drift from
-[`DTB_rep/run_game_dtb.py`](https://github.com/sun-mengwei/dtb-colab-experiments/blob/main/DTB_rep/run_game_dtb.py),
-but no original file is changed.
+No original Deep Tangent Bundle file is modified. The project reuses the
+original flat-parameter/restricted-Jacobian pattern, truncated-SVD approach,
+and Cournot drift in a separate package.
 
-## What is implemented
+## Target experiment
 
-- A smooth neural field `f_theta: R^d -> R^d`.
-- Random selected parameter directions `S_k`, with `m <= M`.
-- Restricted per-particle Jacobians `J_i` without constructing the full
-  `(N,d,M)` Jacobian.
-- The raw stacked system `J_stack` of shape `(N*d,m)`.
-- Explicit relative truncated SVD with `sigma_j > tau*sigma_1`.
-- Particle, log-density, and score Euler updates.
-- Exact automatic differentiation of `grad u`, `div u`, and
-  `grad(div u)`.
-- Linear-quadratic and nonlinear Cournot example games.
-- Tests for the projection, derivatives, initialization, and full step.
-
-## Code layout
+The original repository's Cournot drift is
 
 ```text
-game_dtb/
-  algorithm.py       numbered Blocks 2–10 and the Euler update
-  derivatives.py     grad u, div u, and grad(div u)
-  games.py           example game drifts b(x)
-  models.py          smooth vector-valued TangentMLP
-  parameters.py      flat-parameter helpers adapted from original DTB
-  projection.py      restricted Jacobian + unnormalized SVD system
-  runner.py          experiment loop, saved arrays, and diagnostic plot
-  state.py           particles, log density, score, and Gaussian init
-examples/
-  custom_game.py     instructional custom-drift example
-tests/                mathematical and integration tests
-run_game_dynamics.py command-line entry point
-SUMMARY.md            method and implementation summary
-COLAB_TUTORIAL.md     step-by-step Google Colab instructions
-notebooks/            ready-to-upload Colab notebook
+dx1/dt = -2 b x1 + 2 b mu x2 - 2 b mu x2^2
+dx2/dt = -2 b x2 + 2 b mu x1 - 2 b mu x1^2
 ```
 
-## Quick start
+with `b=1` and `mu=2`. Its equilibria are `(0,0)` and `(0.5,0.5)`; the second
+is stable.
 
-Create an isolated Python environment and install the requirements:
+| Quantity | Replication value |
+|---|---|
+| Time interval | `0 <= t <= 1` |
+| Snapshot times | `0, 0.2, 0.4, 0.6, 0.8, 1.0` |
+| Figure 4.2 initial law | Uniform on `[0,1]^2` |
+| Figure 4.3 initial law | `N((0.5,0.5), 0.03 I)` |
+| Noise amplitude | `sigma_1=sigma_2=0.1` |
+| Algorithm diffusion matrix | `D=diag(sigma_i^2)=0.01 I` |
+
+The last line follows the SDE/Fokker–Planck convention
+`dX=b(X)dt+sigma dW`. Use `--diffusion-entry 0.1` if the underlying source
+instead defines the caption's `0.1` as an entry of `D` itself.
+
+## Fastest replication
+
+Create an environment and install dependencies:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Run the tests:
+Run the mathematical tests:
 
 ```bash
 python -m pytest
 ```
 
-Run a small linear-quadratic game:
+Run both target experiments with Colab-friendly settings:
+
+```bash
+python replicate_thesis_figures.py --device auto
+```
+
+This creates:
+
+```text
+outputs/thesis_replication/
+  figure_4_2_uniform/
+    dtb_snapshots.png
+    sde_baseline_snapshots.png
+    diagnostics.png
+    history.npz
+    config.json
+  figure_4_3_gaussian/
+    dtb_snapshots.png
+    sde_baseline_snapshots.png
+    diagnostics.png
+    history.npz
+    config.json
+```
+
+The red points in the snapshot panels mark `(0,0)` and `(0.5,0.5)`.
+
+## Denser experiment
+
+After the fast run succeeds, use the larger tangent dictionary and point cloud:
+
+```bash
+python replicate_thesis_figures.py --paper-scale --device auto
+```
+
+The paper-scale preset uses `N=5000`, `m=256`, `h=0.01`, and 100 steps. The
+exact network width, particle count, tangent basis, Euler step, and SVD cutoff
+are not visible in the supplied screenshot, so these values are documented
+replication choices rather than claimed source parameters. Override the point
+count with `--particles` when needed.
+
+## Run one initialization only
+
+Uniform Figure 4.2-style run:
 
 ```bash
 python run_game_dynamics.py \
-  --game linear \
-  --particles 64 \
-  --steps 10 \
-  --basis-size 64 \
-  --output-dir outputs/linear_smoke
+  --initial-distribution uniform \
+  --run-sde-baseline \
+  --output-dir outputs/uniform_only
 ```
 
-Run the nonlinear Cournot game:
+Gaussian Figure 4.3-style run:
 
 ```bash
 python run_game_dynamics.py \
-  --game cournot \
-  --particles 128 \
-  --steps 25 \
-  --step-size 0.005 \
-  --basis-size 128 \
-  --svd-rtol 1e-5 \
-  --diffusion 0.03 \
-  --dtype float32 \
-  --device auto \
-  --output-dir outputs/cournot
+  --initial-distribution gaussian \
+  --initial-mean 0.5 \
+  --initial-variance 0.03 \
+  --run-sde-baseline \
+  --output-dir outputs/gaussian_only
 ```
 
-Each run creates:
+## Algorithm implemented
 
-- `config.json`: arguments, resolved device, and dimensions;
-- `history.npz`: particles, score, log density, means, ranks, and residuals;
-- `summary.png`: initial/final particles and mean-strategy evolution.
+For particles `x_i^k`, log density `ell_i^k`, and score `q_i^k`, the target
+velocity is
+
+```text
+v_i^k = b(x_i^k) - 0.5 D q_i^k.
+```
+
+The neural tangent field is projected by the raw stacked least-squares system:
+
+```text
+J_stack = (J_1; ...; J_N)       shape (N*d, m)
+V_stack = (v_1; ...; v_N)       shape (N*d)
+alpha   = V_r Sigma_r^-1 U_r^T V_stack
+u(x)    = J_selected(x) alpha
+```
+
+No `1/N` or `1/sqrt(N)` factor is applied. Singular values are retained when
+`sigma_j > svd_rtol * sigma_1`. The explicit Euler step transports particles,
+log density, and score using exact automatic differentiation of `grad u`,
+`div u`, and `grad(div u)`.
 
 ## Algorithm-to-code map
 
-| Algorithm step | Implementation |
+| Algorithm block | Code |
 |---|---|
-| 1. Initialize `x`, `ell`, `q` | `state.gaussian_particle_state`; Block 1 in `runner.py` |
-| 2. Select `S_k` | Block 2 in `NeuralDTBGameDynamics.step` |
-| 3. Form game velocity | Block 3 in `algorithm.py` |
-| 4. Evaluate selected Jacobians | `projection.selected_parameter_jacobian` |
-| 5. Stack without normalization | `projection.stack_unnormalized_system` |
-| 6. Truncated-SVD solve | `projection.truncated_svd_solve` |
-| 7. Evaluate `u=J alpha` | `derivatives.tangent_velocity_and_spatial_terms` |
-| 8. Spatial derivatives | same function, using nested `jacrev` |
-| 9. Euler updates | Block 9 in `algorithm.py` |
-| 10. Update sampled map | `ParticleState.particles`; labels `z_i` remain fixed |
+| Initialization | `game_dtb/state.py` and Block 1 in `runner.py` |
+| Select tangent coordinates | Block 2 in `algorithm.py` |
+| Game plus score velocity | Block 3 in `algorithm.py` |
+| Restricted Jacobians | `projection.selected_parameter_jacobian` |
+| Unnormalized stack | `projection.stack_unnormalized_system` |
+| Truncated SVD | `projection.truncated_svd_solve` |
+| Spatial score terms | `derivatives.tangent_velocity_and_spatial_terms` |
+| Euler transport | Block 9 in `algorithm.py` |
+| Six-panel replication | `runner._plot_snapshots` |
+| Direct SDE comparison | `runner.simulate_euler_maruyama` |
 
-At the particle level, storing the fixed labels and evolved particles means
-`particles[i] = X_k(labels[i])`. The implementation does not construct a
-closed-form off-sample representation of the composed map `X_k`.
+## Folder layout
 
-## Supplying another game
-
-A drift must accept `(N,d)` particles and return an `(N,d)` tensor:
-
-```python
-def my_drift(x):
-    return -x  # replace with simultaneous player-gradient or response dynamics
+```text
+references/                    supplied TeX algorithm, target image, notes
+game_dtb/                      reusable Neural–DTB implementation
+tests/                         nine mathematical/integration tests
+examples/custom_game.py        instructional custom game
+run_game_dynamics.py           configurable single experiment
+replicate_thesis_figures.py    one-command Figures 4.2/4.3 workflow
+COLAB_TUTORIAL.md               GitHub-to-Colab instructions
+notebooks/                      executable Colab notebook
+SUMMARY.md                      technical assumptions and validation
 ```
 
-Pass it directly to `NeuralDTBGameDynamics`. See
-[`examples/custom_game.py`](examples/custom_game.py) for a complete commented
-example.
+## Reading the output
 
-For a non-isotropic diffusion, call the Python API with a symmetric positive
-semidefinite `(d,d)` tensor. The CLI uses `D = diffusion * I`.
+`history.npz` contains the six DTB particle snapshots, optional SDE baseline,
+final score and log density, projection residuals, retained SVD ranks, and
+coefficient norms. A low projection residual is necessary but not sufficient
+for a scientifically accurate result; also compare the DTB point clouds with
+the direct SDE baseline and run refinement studies.
 
-## Choosing numerical settings
+## Important limitations
 
-- Start with `N=32–64`, `m=32–64`, and 5–10 steps.
-- Reduce `h` if particles, score norms, or projection coefficients grow fast.
-- Increase `m` if the projection residual stays high, subject to memory.
-- Tightening `svd_rtol` retains weaker tangent directions and may sharply
-  increase `|alpha|`. Start around `1e-5` for float32 experiments and perform
-  a tolerance sweep before interpreting results.
-- Use `tanh`, `gelu`, or `silu`. Do not use ReLU because the score equation
-  needs second spatial derivatives.
-- `grad(div u)` requires nested differentiation and is the main computational
-  cost. Scale `N` and `m` gradually on Colab.
+- Uniform density has zero score only in the box interior and a nonsmooth
+  boundary. The implementation uses the interior score for sampled points.
+- The scheme is explicit Euler and has no adaptive time step.
+- The source screenshot does not expose every training/numerical parameter.
+- The neural parameters stay fixed because the supplied algorithm does not
+  prescribe the original Allen–Cahn periodic reset/refit rule.
+- Strong conclusions require step-size, particle-count, tangent-basis, and SVD
+  tolerance refinement.
 
-## Scope and limitations
-
-- The scheme is explicit Euler and has no adaptive time-step controller.
-- Strategies are unconstrained. Add a mathematically justified coordinate
-  transform or boundary treatment for simplex/box-constrained games; naive
-  clipping is inconsistent with the transported score equation.
-- The supplied algorithm does not specify a neural reset/refit rule, so
-  `theta` stays fixed while `S_k` is redrawn. This differs from the periodic
-  reset used by the original Allen–Cahn DTB experiment.
-- The transported score and log density are first-order discretizations. They
-  should be monitored for long runs.
-
-For Google Colab, continue with [COLAB_TUTORIAL.md](COLAB_TUTORIAL.md).
+See [COLAB_TUTORIAL.md](COLAB_TUTORIAL.md) for the GitHub workflow.

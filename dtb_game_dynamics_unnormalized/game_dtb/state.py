@@ -66,3 +66,39 @@ def gaussian_particle_state(
     state = ParticleState(particles, log_density, score, labels)
     state.validate()
     return state
+
+
+def uniform_box_particle_state(
+    n: int,
+    dim: int,
+    low: float,
+    high: float,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+    generator: torch.Generator | None = None,
+) -> ParticleState:
+    """Initialize the Figure 4.2 uniform distribution on a box.
+
+    The density is constant and its score is zero in the box interior.  The
+    score is not classically defined on the boundary, but samples hit that
+    measure-zero set with probability zero.  This is the particle-level
+    interpretation used by the replication preset.
+    """
+
+    if n < 1 or dim < 1 or not high > low:
+        raise ValueError("n and dim must be positive and high must exceed low")
+    labels = (
+        torch.rand(n, dim, device=device, dtype=dtype, generator=generator)
+        * (high - low)
+        + low
+    )
+    particles = labels.clone()
+    log_density_value = -dim * math.log(high - low)
+    log_density = torch.full(
+        (n,), log_density_value, device=device, dtype=dtype
+    )
+    score = torch.zeros_like(particles)
+    state = ParticleState(particles, log_density, score, labels)
+    state.validate()
+    return state

@@ -1,0 +1,648 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,mathtools,bm}
+\usepackage{enumitem}
+\usepackage{microtype}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\Id}{I}
+\newcommand{\argminop}{\operatorname*{arg\,min}}
+
+\title{Discrete Neural--DTB Scheme for Distributional Game Dynamics}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Problem formulation}
+
+Let $\lambda$ be a reference probability measure on $\R^d$, and let
+\[
+Z\sim\lambda,
+\qquad Z\in\R^d.
+\]
+We represent the evolving distribution by a pushforward map
+\[
+X_t:\R^d\to\R^d,
+\qquad
+\rho_t=(X_t)_{\#}\lambda.
+\]
+Thus, if
+\[
+x_t=X_t(Z)\in\R^d,
+\]
+then $x_t\sim\rho_t$.
+
+Assume that the density $\rho_t$ satisfies the Fokker--Planck equation
+\[
+\partial_t\rho_t
+=
+-\nabla_x\cdot(\rho_t b)
++
+\frac12\nabla_x\cdot(D\nabla_x\rho_t),
+\]
+where
+\[
+b:\R^d\to\R^d,
+\qquad
+D\in\R^{d\times d}.
+\]
+Using
+\[
+\nabla_x\rho_t
+=
+\rho_t\nabla_x\log\rho_t,
+\]
+the equation can be written as
+\[
+\partial_t\rho_t+\nabla_x\cdot(\rho_t v_t)=0,
+\]
+where
+\[
+\boxed{
+v_t(x)=b(x)-\frac12Dq_t(x)\in\R^d,
+}
+\qquad
+\boxed{
+q_t(x)=\nabla_x\log\rho_t(x)\in\R^d.
+}
+\]
+The corresponding pushforward-map equation is
+\[
+\boxed{
+\frac{\dd}{\dd t}X_t(z)=v_t(X_t(z))\in\R^d.
+}
+\]
+
+\section{Neural tangent vector fields}
+
+Let
+\[
+f_{\theta_k}:\R^d\to\R^d,
+\qquad
+\theta_k\in\R^M,
+\]
+where $M$ is the total number of trainable parameters. At time step $k$, select an index set
+\[
+S_k=\{\ell_1,\ldots,\ell_m\}\subset\{1,\ldots,M\},
+\qquad
+|S_k|=m\leq M.
+\]
+The selected parameter vector has dimension
+\[
+\theta_{k,S_k}
+=
+(\theta_{k,\ell_1},\ldots,\theta_{k,\ell_m})^\top
+\in\R^m.
+\]
+
+Define the selected parameter Jacobian
+\[
+\boxed{
+J_{k,S_k}(x)
+:=
+\frac{\partial f_{\theta_k}(x)}{\partial\theta_{S_k}}
+\in\R^{d\times m}.
+}
+\]
+For a common coefficient vector
+\[
+\alpha\in\R^m,
+\]
+define the candidate Eulerian tangent vector field
+\[
+\boxed{
+u_k^\alpha(x)=J_{k,S_k}(x)\alpha\in\R^d.
+}
+\]
+At time step $k$, the coefficient $\alpha_k\in\R^m$ is chosen so that $u_k^{\alpha_k}$ approximates the target game velocity on the current particles.
+
+\section{Time discretization}
+
+Choose $h>0$ and define
+\[
+t_k=kh,
+\qquad
+k=0,1,\ldots,K.
+\]
+Let
+\[
+X_k:\R^d\to\R^d,
+\qquad
+X_k(z)\approx X_{t_k}(z),
+\qquad
+\rho_k=(X_k)_{\#}\lambda.
+\]
+For samples
+\[
+z_1,\ldots,z_N\in\R^d,
+\qquad
+z_i\sim\lambda,
+\]
+define
+\[
+\boxed{
+x_i^k=X_k(z_i)\in\R^d.
+}
+\]
+Store the log-density and score along the particles:
+\[
+\boxed{
+\ell_i^k=\log\rho_k(x_i^k)\in\R,
+}
+\qquad
+\boxed{
+q_i^k=\nabla_x\log\rho_k(x_i^k)\in\R^d.
+}
+\]
+The target game velocity is
+\[
+\boxed{
+v_i^k
+=
+b(x_i^k)-\frac12Dq_i^k
+\in\R^d.
+}
+\]
+
+\section{Unnormalized discrete tangent projection}
+
+At particle $x_i^k$, define
+\[
+\boxed{
+J_i^k
+:=
+J_{k,S_k}(x_i^k)
+=
+\frac{\partial f_{\theta_k}(x_i^k)}{\partial\theta_{S_k}}
+\in\R^{d\times m}.
+}
+\]
+The unnormalized empirical tangent projection is
+\[
+\boxed{
+\alpha_k
+=
+\argminop_{\alpha\in\R^m}
+\sum_{i=1}^N
+\left\|J_i^k\alpha-v_i^k\right\|_2^2.
+}
+\]
+No factor $1/N$ or $1/\sqrt N$ is used.
+
+Define
+\[
+\boxed{
+G_k
+=
+\sum_{i=1}^N(J_i^k)^\top J_i^k
+\in\R^{m\times m},
+}
+\]
+and
+\[
+\boxed{
+P_k
+=
+\sum_{i=1}^N(J_i^k)^\top v_i^k
+\in\R^m.
+}
+\]
+The normal equation is
+\[
+\boxed{
+G_k\alpha_k=P_k,
+}
+\]
+where
+\[
+G_k\alpha_k\in\R^m,
+\qquad
+P_k\in\R^m.
+\]
+If $G_k$ is invertible, then $\alpha_k=G_k^{-1}P_k$. If it is singular, the minimum-norm normal-equation solution is $\alpha_k=G_k^\dagger P_k$.
+
+\subsection{Unnormalized stacked SVD system}
+
+Stack the per-sample Jacobians and target velocities without normalization:
+\[
+\boxed{
+\mathcal J_k
+=
+\begin{pmatrix}
+J_1^k\\
+\vdots\\
+J_N^k
+\end{pmatrix}
+\in\R^{Nd\times m},
+}
+\qquad
+\boxed{
+\mathcal V_k
+=
+\begin{pmatrix}
+v_1^k\\
+\vdots\\
+v_N^k
+\end{pmatrix}
+\in\R^{Nd}.
+}
+\]
+Then
+\[
+\alpha_k
+=
+\argminop_{\alpha\in\R^m}
+\|\mathcal J_k\alpha-\mathcal V_k\|_2^2.
+\]
+Let
+\[
+s=\min\{Nd,m\}.
+\]
+The thin SVD is
+\[
+\boxed{
+\mathcal J_k=U_k\Sigma_kV_k^\top,
+}
+\]
+with
+\[
+U_k\in\R^{Nd\times s},
+\qquad
+\Sigma_k\in\R^{s\times s},
+\qquad
+V_k\in\R^{m\times s}.
+\]
+Using a relative tolerance $\tau>0$, retain singular values satisfying
+\[
+\sigma_j^k>\tau\sigma_1^k.
+\]
+If $r_k$ singular values are retained, then
+\[
+U_{k,r_k}\in\R^{Nd\times r_k},
+\quad
+\Sigma_{k,r_k}\in\R^{r_k\times r_k},
+\quad
+V_{k,r_k}\in\R^{m\times r_k},
+\]
+and the truncated-SVD solution is
+\[
+\boxed{
+\alpha_k
+=
+V_{k,r_k}\Sigma_{k,r_k}^{-1}U_{k,r_k}^\top\mathcal V_k
+\in\R^m.
+}
+\]
+The projected velocity field is
+\[
+\boxed{
+u_k(x)=J_{k,S_k}(x)\alpha_k\in\R^d.
+}
+\]
+At all particles, the stacked projected velocity is
+\[
+\mathcal J_k\alpha_k\in\R^{Nd}.
+\]
+
+\paragraph{Scaling remark.}
+Replacing the unnormalized objective by its average, or multiplying both $\mathcal J_k$ and $\mathcal V_k$ by $1/\sqrt N$, does not change the exact least-squares minimizer. The present formulation omits these factors. A relative SVD cutoff is also unchanged by a common scaling.
+
+\section{Discrete map, density, and score updates}
+
+The forward-Euler map update is
+\[
+\boxed{
+X_{k+1}(z)
+=
+X_k(z)+h\,u_k(X_k(z))
+\in\R^d.
+}
+\]
+Equivalently,
+\[
+X_{k+1}=(\Id+h\,u_k)\circ X_k.
+\]
+At the particle level,
+\[
+\boxed{
+x_i^{k+1}
+=
+x_i^k+h\,u_k(x_i^k)
+\in\R^d.
+}
+\]
+The updated density is
+\[
+\rho_{k+1}=(X_{k+1})_{\#}\lambda.
+\]
+
+\subsection{Log-density update}
+
+Along a trajectory transported by $u_t$,
+\[
+\frac{\dd}{\dd t}\log\rho_t(x_t)
+=-\nabla_x\cdot u_t(x_t).
+\]
+Therefore,
+\[
+\boxed{
+\ell_i^{k+1}
+=
+\ell_i^k-h\,\nabla_x\cdot u_k(x_i^k)
+\in\R.
+}
+\]
+Here
+\[
+\nabla_x\cdot u_k(x_i^k)\in\R.
+\]
+
+\subsection{Score update}
+
+Let $q_t(x)=\nabla_x\log\rho_t(x)$. Along $\dot x_t=u_t(x_t)$,
+\[
+\frac{\dd}{\dd t}q_t(x_t)
+=
+-[\nabla_xu_t(x_t)]^\top q_t(x_t)
+-\nabla_x[\nabla_x\cdot u_t](x_t).
+\]
+The dimensions of the spatial derivatives are
+\[
+\nabla_xu_k(x_i^k)\in\R^{d\times d},
+\qquad
+\nabla_x\cdot u_k(x_i^k)\in\R,
+\qquad
+\nabla_x[\nabla_x\cdot u_k](x_i^k)\in\R^d.
+\]
+Hence,
+\[
+\boxed{
+\begin{aligned}
+q_i^{k+1}
+=
+q_i^k-h\Big(&[\nabla_xu_k(x_i^k)]^\top q_i^k\\
+&+\nabla_x[\nabla_x\cdot u_k](x_i^k)\Big)
+\in\R^d.
+\end{aligned}
+}
+\]
+
+\section{Initialization}
+
+Assume
+\[
+X_0:\R^d\to\R^d,
+\qquad
+X_0(z)=\phi(z),
+\]
+and that $\rho_0=(X_0)_{\#}\lambda$ is known. For each $z_i\in\R^d$, initialize
+\[
+\boxed{
+x_i^0=X_0(z_i)\in\R^d,
+}
+\]
+\[
+\boxed{
+\ell_i^0=\log\rho_0(x_i^0)\in\R,
+}
+\]
+and
+\[
+\boxed{
+q_i^0=\nabla_x\log\rho_0(x_i^0)\in\R^d.
+}
+\]
+For $X_0(z)=z$ and $\lambda=\mathcal N(0,I_d)$,
+\[
+x_i^0=z_i,
+\qquad
+\ell_i^0=-\frac12\|z_i\|^2-\frac d2\log(2\pi),
+\qquad
+q_i^0=-z_i.
+\]
+
+\section{Unnormalized SVD-based Neural--DTB algorithm}
+
+\begin{enumerate}[leftmargin=2.3em,label=\textbf{Step \arabic*.}]
+    \item \textbf{Initialize the particles and density quantities.}
+
+    Sample
+    \[
+    z_i\sim\lambda,
+    \qquad
+    z_i\in\R^d,
+    \qquad
+    i=1,\ldots,N.
+    \]
+    Set
+    \[
+    x_i^0=X_0(z_i)\in\R^d,
+    \qquad
+    \ell_i^0=\log\rho_0(x_i^0)\in\R,
+    \qquad
+    q_i^0=\nabla_x\log\rho_0(x_i^0)\in\R^d.
+    \]
+
+    \item \textbf{Select tangent directions.}
+
+    Let $\theta_k\in\R^M$ be the full parameter vector. Select
+    \[
+    S_k\subset\{1,\ldots,M\},
+    \qquad
+    |S_k|=m,
+    \qquad
+    \theta_{k,S_k}\in\R^m.
+    \]
+
+    \item \textbf{Compute target game velocities.}
+
+    For each particle, compute
+    \[
+    v_i^k
+    =
+    b(x_i^k)-\frac12Dq_i^k
+    \in\R^d,
+    \]
+    where $b(x_i^k)\in\R^d$, $D\in\R^{d\times d}$, and $q_i^k\in\R^d$.
+
+    \item \textbf{Evaluate the selected parameter Jacobians.}
+
+    For each $i$, compute
+    \[
+    J_i^k
+    =
+    \frac{\partial f_{\theta_k}(x_i^k)}{\partial\theta_{S_k}}
+    \in\R^{d\times m}.
+    \]
+    The batched, unflattened Jacobian has shape
+    \[
+    (J_i^k)_{i=1}^N\in\R^{N\times d\times m}.
+    \]
+
+    \item \textbf{Build the unnormalized stacked system.}
+
+    Stack
+    \[
+    \mathcal J_k
+    =
+    \begin{pmatrix}
+    J_1^k\\ \vdots\\ J_N^k
+    \end{pmatrix}
+    \in\R^{Nd\times m},
+    \qquad
+    \mathcal V_k
+    =
+    \begin{pmatrix}
+    v_1^k\\ \vdots\\ v_N^k
+    \end{pmatrix}
+    \in\R^{Nd}.
+    \]
+    No $1/\sqrt N$ factor is applied.
+
+    \item \textbf{Compute the truncated SVD solution.}
+
+    Compute
+    \[
+    \mathcal J_k=U_k\Sigma_kV_k^\top,
+    \]
+    where, with $s=\min\{Nd,m\}$,
+    \[
+    U_k\in\R^{Nd\times s},
+    \quad
+    \Sigma_k\in\R^{s\times s},
+    \quad
+    V_k\in\R^{m\times s}.
+    \]
+    Retain $r_k$ singular values satisfying $\sigma_j^k>\tau\sigma_1^k$ and compute
+    \[
+    \alpha_k
+    =
+    V_{k,r_k}\Sigma_{k,r_k}^{-1}U_{k,r_k}^\top\mathcal V_k
+    \in\R^m.
+    \]
+
+    \item \textbf{Define and evaluate the Eulerian tangent velocity.}
+
+    Define
+    \[
+    u_k(x)=J_{k,S_k}(x)\alpha_k\in\R^d.
+    \]
+    At each particle,
+    \[
+    u_k(x_i^k)=J_i^k\alpha_k\in\R^d.
+    \]
+
+    \item \textbf{Evaluate the spatial derivatives.}
+
+    For each particle, compute
+    \[
+    \nabla_xu_k(x_i^k)\in\R^{d\times d},
+    \qquad
+    \nabla_x\cdot u_k(x_i^k)\in\R,
+    \]
+    and
+    \[
+    \nabla_x[\nabla_x\cdot u_k](x_i^k)\in\R^d.
+    \]
+
+    \item \textbf{Apply the explicit Euler updates.}
+
+    Update
+    \[
+    x_i^{k+1}
+    =
+    x_i^k+h\,u_k(x_i^k)
+    \in\R^d,
+    \]
+    \[
+    \ell_i^{k+1}
+    =
+    \ell_i^k-h\,\nabla_x\cdot u_k(x_i^k)
+    \in\R,
+    \]
+    and
+    \[
+    \begin{aligned}
+    q_i^{k+1}
+    =
+    q_i^k-h\Big(&[\nabla_xu_k(x_i^k)]^\top q_i^k\\
+    &+\nabla_x[\nabla_x\cdot u_k](x_i^k)\Big)
+    \in\R^d.
+    \end{aligned}
+    \]
+
+    \item \textbf{Update the pushforward map.}
+
+    For every $z\in\R^d$,
+    \[
+    X_{k+1}(z)
+    =
+    X_k(z)+h\,u_k(X_k(z))
+    \in\R^d.
+    \]
+
+    \item \textbf{Repeat.}
+
+    Continue for $k=0,\ldots,K-1$.
+\end{enumerate}
+
+\section{Dimension summary}
+
+\[
+\begin{array}{c|c}
+\text{Quantity} & \text{Dimension}\\
+\hline
+z_i,\;x_i^k,\;q_i^k,\;v_i^k,\;u_k(x_i^k) & \R^d\\
+\ell_i^k,\;\nabla_x\cdot u_k(x_i^k) & \R\\
+\theta_k & \R^M\\
+\theta_{k,S_k},\;\alpha_k,\;P_k & \R^m\\
+J_i^k & \R^{d\times m}\\
+(J_i^k)_{i=1}^N & \R^{N\times d\times m}\\
+\mathcal J_k & \R^{Nd\times m}\\
+\mathcal V_k,\;\mathcal J_k\alpha_k & \R^{Nd}\\
+G_k & \R^{m\times m}\\
+\nabla_xu_k(x_i^k) & \R^{d\times d}\\
+\nabla_x[\nabla_x\cdot u_k](x_i^k) & \R^d
+\end{array}
+\]
+
+\section{Compact form}
+
+One complete unnormalized SVD-based step is
+\[
+\boxed{
+\begin{aligned}
+v_i^k
+&=b(x_i^k)-\frac12Dq_i^k\in\R^d,\\
+J_i^k
+&=\partial_{\theta_{S_k}}f_{\theta_k}(x_i^k)\in\R^{d\times m},\\
+\mathcal J_k
+&=(J_1^k;\ldots;J_N^k)\in\R^{Nd\times m},\\
+\mathcal V_k
+&=(v_1^k;\ldots;v_N^k)\in\R^{Nd},\\
+\alpha_k
+&=V_{k,r_k}\Sigma_{k,r_k}^{-1}U_{k,r_k}^\top\mathcal V_k\in\R^m,\\
+u_k(x)
+&=J_{k,S_k}(x)\alpha_k\in\R^d,\\
+x_i^{k+1}
+&=x_i^k+h\,u_k(x_i^k)\in\R^d,\\
+\ell_i^{k+1}
+&=\ell_i^k-h\,\nabla_x\cdot u_k(x_i^k)\in\R,\\
+q_i^{k+1}
+&=q_i^k-h\left([\nabla_xu_k(x_i^k)]^\top q_i^k
++\nabla_x[\nabla_x\cdot u_k](x_i^k)\right)\in\R^d.
+\end{aligned}
+}
+\]
+At the map level,
+\[
+\boxed{
+X_{k+1}(z)=X_k(z)+h\,u_k(X_k(z))\in\R^d.
+}
+\]
+
+\end{document}

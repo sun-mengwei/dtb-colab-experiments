@@ -1,61 +1,69 @@
-# Google Colab Tutorial Using GitHub
+# Colab Tutorial: Reproduce Figures 4.2 and 4.3 from GitHub
 
-Colab does not mount GitHub in the same way it mounts Google Drive. Instead,
-it **clones** the GitHub repository into the temporary Colab runtime. This
-tutorial uses the published `codex/game-dynamics-dtb` branch. After that branch
-is merged, change `BRANCH` to `main`.
+Colab **clones** source code from GitHub into temporary runtime storage. Google
+Drive is mounted later only to preserve generated outputs.
 
-The ready-made notebook is
-`notebooks/game_dynamics_dtb_colab.ipynb`.
+## 1. Open the notebook
 
-## 1. Open the notebook from GitHub
-
-Use the notebook's GitHub page and select **Open in Colab**, or open Colab and
-choose **File → Open notebook → GitHub**, then enter:
+In Colab, choose **File → Open notebook → GitHub** and enter:
 
 ```text
 https://github.com/sun-mengwei/dtb-colab-experiments
 ```
 
-Select:
+Choose branch `codex/game-dynamics-dtb`, then open:
 
 ```text
 dtb_game_dynamics_unnormalized/notebooks/game_dynamics_dtb_colab.ipynb
 ```
 
-In Colab, select **Runtime → Change runtime type → T4 GPU** when available.
+Select **Runtime → Change runtime type → T4 GPU** when available.
 
-## 2. Clone the GitHub branch
-
-The notebook begins with the following cell. It downloads a fresh copy of the
-branch into `/content/dtb-colab-experiments`:
+## 2. Clone the branch
 
 ```python
 import pathlib, shutil, subprocess
 
 REPO_URL = "https://github.com/sun-mengwei/dtb-colab-experiments.git"
-BRANCH = "codex/game-dynamics-dtb"  # use "main" after the branch is merged
+BRANCH = "codex/game-dynamics-dtb"  # change to main after merge
 REPO_DIR = pathlib.Path("/content/dtb-colab-experiments")
 
 if REPO_DIR.exists():
     shutil.rmtree(REPO_DIR)
 
 subprocess.run(
-    [
-        "git", "clone", "--depth", "1", "--branch", BRANCH,
-        REPO_URL, str(REPO_DIR),
-    ],
+    ["git", "clone", "--depth", "1", "--branch", BRANCH,
+     REPO_URL, str(REPO_DIR)],
     check=True,
 )
 
-PROJECT_DIR = REPO_DIR / "dtb_game_dynamics_unnormalized"
-assert (PROJECT_DIR / "run_game_dynamics.py").exists()
 %cd /content/dtb-colab-experiments/dtb_game_dynamics_unnormalized
 ```
 
-Colab storage is temporary. Rerun this cell after starting a new runtime.
+## 3. Read the algorithm and target together
 
-## 3. Install dependencies and inspect the runtime
+The code folder now contains:
+
+```text
+references/dtb_game_dynamics_unnormalized_dimensions.tex
+references/target_figures_4_2_4_3.png
+references/README.md
+```
+
+Display the target:
+
+```python
+from IPython.display import Image, display
+display(Image("references/target_figures_4_2_4_3.png"))
+```
+
+Print the reference notes:
+
+```python
+print(open("references/README.md").read())
+```
+
+## 4. Install and test
 
 ```python
 !python -m pip install -q -r requirements.txt
@@ -63,7 +71,6 @@ Colab storage is temporary. Rerun this cell after starting a new runtime.
 
 ```python
 import platform, torch
-
 print("Python:", platform.python_version())
 print("PyTorch:", torch.__version__)
 print("CUDA available:", torch.cuda.is_available())
@@ -71,83 +78,84 @@ if torch.cuda.is_available():
     print("GPU:", torch.cuda.get_device_name(0))
 ```
 
-## 4. Run the mathematical tests
-
 ```python
 !python -m pytest
 ```
 
-The expected result is `5 passed`. Do not proceed to a long experiment if a
-test fails.
+Expected: `9 passed`.
 
-## 5. Run the small linear-game example
+## 5. Run both replications
 
 ```python
-!python run_game_dynamics.py \
-  --game linear \
-  --particles 32 \
-  --steps 5 \
-  --basis-size 32 \
-  --width 12 \
-  --depth 2 \
-  --dtype float32 \
+!python replicate_thesis_figures.py \
   --device auto \
-  --output-dir outputs/colab_linear
+  --output-root outputs/colab_replication
 ```
 
-Display the result:
+This runs:
+
+- Figure 4.2 with uniform initial samples on `[0,1]^2`;
+- Figure 4.3 with `N((0.5,0.5), 0.03 I)` initial samples;
+- the Neural–DTB scheme using `sigma_1=sigma_2=0.1`, hence `D=0.01 I`;
+- an Euler–Maruyama baseline for the same SDE.
+
+## 6. Display the results
 
 ```python
 from IPython.display import Image, display
-display(Image("outputs/colab_linear/summary.png"))
+
+root = "outputs/colab_replication"
+for relative in [
+    "figure_4_2_uniform/dtb_snapshots.png",
+    "figure_4_2_uniform/sde_baseline_snapshots.png",
+    "figure_4_3_gaussian/dtb_snapshots.png",
+    "figure_4_3_gaussian/sde_baseline_snapshots.png",
+]:
+    print(relative)
+    display(Image(f"{root}/{relative}"))
 ```
 
-Inspect numerical diagnostics:
+Display numerical diagnostics:
+
+```python
+display(Image(f"{root}/figure_4_2_uniform/diagnostics.png"))
+display(Image(f"{root}/figure_4_3_gaussian/diagnostics.png"))
+```
+
+## 7. Inspect saved arrays
 
 ```python
 import numpy as np
 
-data = np.load("outputs/colab_linear/history.npz")
-print("final mean:", data["means"][-1])
-print("projection residuals:", data["projection_residuals"])
-print("retained ranks:", data["retained_ranks"])
-print("alpha norms:", data["alpha_norms"])
-print("final score RMS:", np.sqrt(np.mean(data["final_score"] ** 2)))
+data = np.load(f"{root}/figure_4_3_gaussian/history.npz")
+print("snapshot times:", data["snapshot_times"])
+print("DTB final mean:", data["snapshot_particles"][-1].mean(axis=0))
+print("SDE final mean:", data["sde_baseline_particles"][-1].mean(axis=0))
+print("final projection residual:", data["projection_residuals"][-1])
+print("final retained rank:", data["retained_ranks"][-1])
+print("final alpha norm:", data["alpha_norms"][-1])
 ```
 
-## 6. Run the Cournot example
+## 8. Optional denser run
 
-Start small because the score equation requires nested automatic
-differentiation:
+Only start this after the fast run succeeds:
 
 ```python
-!python run_game_dynamics.py \
-  --game cournot \
-  --particles 64 \
-  --steps 10 \
-  --step-size 0.005 \
-  --basis-size 64 \
-  --svd-rtol 1e-5 \
-  --diffusion 0.03 \
-  --width 24 \
-  --depth 2 \
-  --dtype float32 \
-  --device auto \
-  --output-dir outputs/colab_cournot
+RUN_PAPER_SCALE = False
+if RUN_PAPER_SCALE:
+    !python replicate_thesis_figures.py \
+      --paper-scale \
+      --device auto \
+      --output-root outputs/paper_scale
 ```
 
-```python
-display(Image("outputs/colab_cournot/summary.png"))
-```
+The denser preset uses `N=5000`, `m=256`, `h=0.01`, and 100 steps. These are
+documented replication choices because the exact source values are not visible
+in the supplied screenshot.
 
-The `1e-5` cutoff is a conservative float32 starting point. Repeat the run
-with nearby tolerances and compare the retained rank, projection residual, and
-`|alpha|`. Increase only one setting at a time.
+## 9. Save results to Drive
 
-## 7. Save outputs to Google Drive
-
-GitHub stores source code, not runtime outputs. Mount Google Drive to preserve
-results after the Colab runtime ends:
+Colab runtime files disappear when the session ends:
 
 ```python
 from google.colab import drive
@@ -155,20 +163,11 @@ drive.mount("/content/drive")
 ```
 
 ```python
-!zip -qr dtb_game_outputs.zip outputs
-!cp dtb_game_outputs.zip "/content/drive/MyDrive/"
+!zip -qr dtb_game_replication.zip outputs/colab_replication
+!cp dtb_game_replication.zip "/content/drive/MyDrive/"
 ```
 
-Alternatively, download the archive directly:
-
-```python
-from google.colab import files
-files.download("dtb_game_outputs.zip")
-```
-
-## 8. Pull later GitHub changes
-
-If the repository is already cloned in the current runtime:
+## 10. Pull later changes
 
 ```python
 %cd /content/dtb-colab-experiments
@@ -176,11 +175,4 @@ If the repository is already cloned in the current runtime:
 %cd /content/dtb-colab-experiments/dtb_game_dynamics_unnormalized
 ```
 
-After the branch is merged, use `main` instead.
-
-## 9. Modify the game drift
-
-Open `game_dtb/games.py` or copy `examples/custom_game.py`. A valid drift maps
-an `(N,d)` tensor to another `(N,d)` tensor. If the game uses a simplex or box
-strategy space, derive a compatible coordinate transform or boundary model;
-do not add clipping without also reconsidering the density and score equations.
+After the branch is merged, replace the branch name with `main`.
