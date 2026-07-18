@@ -44,3 +44,10 @@ arrays are finite through `t=1`; the final mean is approximately
 The larger particle count was intentionally run with the same `m=128` tangent
 basis so the result remains Colab-friendly. For a convergence study, increase
 the particle and tangent-basis sizes together using `--paper-scale`.
+
+## Sample-count comparison
+
+`sample_count_study/` compares `N=512`, `N=1024`, and `N=5000` using the same
+three-player game, seed, time grid, network, and `m=128` tangent basis. A more
+conservative `svd_rtol=1e-3` is used for every run so the 5,000-particle solve
+stays finite. See its README and `sample_count_comparison.png` for the results.

@@ -89,6 +89,18 @@ A completed 256-particle result is included under
 [`verified_results/three_player_n256/`](verified_results/README.md) so the 3D
 panels and raw arrays can be inspected without rerunning Colab.
 
+Compare the requested larger sample counts with a shared numerical setup:
+
+```bash
+python replicate_three_player_game.py --particles 512  --svd-rtol 1e-3 --skip-sde-baseline --output-dir outputs/sample_study_stable/n512
+python replicate_three_player_game.py --particles 1024 --svd-rtol 1e-3 --skip-sde-baseline --output-dir outputs/sample_study_stable/n1024
+python replicate_three_player_game.py --particles 5000 --svd-rtol 1e-3 --skip-sde-baseline --output-dir outputs/sample_study_stable/n5000
+python compare_sample_counts.py
+```
+
+The comparison figure, metrics, individual panels, and raw histories are also
+included in [`verified_results/sample_count_study/`](verified_results/sample_count_study/README.md).
+
 This creates:
 
 ```text
@@ -129,6 +141,10 @@ For the numerically stiffer 3D score transport, the validated preset uses
 ```bash
 python replicate_three_player_game.py --paper-scale --device auto
 ```
+
+Large empirical systems are more sensitive to rare particle excursions. The
+verified `N=512,1024,5000` comparison therefore uses `svd_rtol=1e-3` for every
+sample count; changing the cutoff between runs would confound the comparison.
 
 ## Run one initialization only
 

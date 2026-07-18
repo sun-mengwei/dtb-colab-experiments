@@ -160,7 +160,36 @@ The red markers show the origin, `(3/8,3/8,3/8)`, and the permutations of
 `(1/2,1/2,0)`. The validated 3D preset uses `h=0.005`, 200 steps, `m=128`, and
 `svd_rtol=1e-4` because the coarser 2D time step is unstable for this case.
 
-## 9. Optional denser runs
+## 9. Compare 512, 1,024, and 5,000 samples
+
+Use the same conservative SVD cutoff for all three runs. The 5,000-particle
+case takes substantially longer on a CPU runtime; select a GPU runtime when
+available.
+
+```python
+!python replicate_three_player_game.py \
+  --particles 512 --svd-rtol 1e-3 --skip-sde-baseline \
+  --device auto --output-dir outputs/sample_study_stable/n512
+
+!python replicate_three_player_game.py \
+  --particles 1024 --svd-rtol 1e-3 --skip-sde-baseline \
+  --device auto --output-dir outputs/sample_study_stable/n1024
+
+!python replicate_three_player_game.py \
+  --particles 5000 --svd-rtol 1e-3 --skip-sde-baseline \
+  --device auto --output-dir outputs/sample_study_stable/n5000
+
+!python compare_sample_counts.py
+```
+
+```python
+display(Image("outputs/sample_study_stable/sample_count_comparison.png"))
+```
+
+Exact metrics are saved in
+`outputs/sample_study_stable/sample_count_metrics.csv`.
+
+## 10. Optional denser tangent basis
 
 Only start this after the fast run succeeds:
 
@@ -177,11 +206,12 @@ if RUN_PAPER_SCALE:
       --output-dir outputs/paper_scale_three_player
 ```
 
-The denser preset uses `N=5000`, `m=256`, `h=0.01`, and 100 steps. These are
-documented replication choices because the exact source values are not visible
-in the supplied screenshot.
+The 2D denser preset uses `N=5000`, `m=256`, `h=0.01`, and 100 steps. The 3D
+paper-scale preset uses `m=256`, `h=0.005`, and 200 steps. These are documented
+replication choices because the exact source values are not visible in the
+supplied screenshot.
 
-## 10. Save results to Drive
+## 11. Save results to Drive
 
 Colab runtime files disappear when the session ends:
 
@@ -197,7 +227,7 @@ drive.mount("/content/drive")
 !cp dtb_game_replication.zip "/content/drive/MyDrive/"
 ```
 
-## 11. Pull later changes
+## 12. Pull later changes
 
 ```python
 %cd /content/dtb-colab-experiments

@@ -16,6 +16,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--paper-scale", action="store_true")
     parser.add_argument("--particles", type=int, default=None)
+    parser.add_argument(
+        "--svd-rtol",
+        type=float,
+        default=None,
+        help="override the relative SVD cutoff (use 1e-3 for large-N runs)",
+    )
     parser.add_argument("--device", default="auto")
     parser.add_argument("--output-dir", default="outputs/three_player_replication")
     parser.add_argument("--skip-sde-baseline", action="store_true")
@@ -42,7 +48,7 @@ def experiment_args(cli: argparse.Namespace) -> SimpleNamespace:
         steps=steps,
         step_size=step_size,
         basis_size=basis_size,
-        svd_rtol=1e-4,
+        svd_rtol=1e-4 if cli.svd_rtol is None else cli.svd_rtol,
         noise_std=0.1,
         diffusion_entry=None,
         initial_distribution="uniform",
