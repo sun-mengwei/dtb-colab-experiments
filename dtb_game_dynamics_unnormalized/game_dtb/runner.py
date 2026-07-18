@@ -13,7 +13,11 @@ import numpy as np
 import torch
 
 from .algorithm import DTBConfig, NeuralDTBGameDynamics
-from .games import cournot_duopoly_drift, linear_quadratic_drift
+from .games import (
+    cournot_duopoly_drift,
+    cournot_three_player_drift,
+    linear_quadratic_drift,
+)
 from .models import TangentMLP
 from .state import gaussian_particle_state, uniform_box_particle_state
 
@@ -278,6 +282,12 @@ def _make_drift(args: Any) -> Callable[[torch.Tensor], torch.Tensor]:
         return lambda x: cournot_duopoly_drift(
             x, b=args.cournot_b, mu=args.cournot_mu
         )
+    if args.game == "cournot3":
+        if args.dim != 3:
+            raise ValueError("the three-player Cournot example requires --dim 3")
+        return lambda x: cournot_three_player_drift(
+            x, b=args.cournot_b, mu=args.cournot_mu
+        )
     if args.game == "linear":
         if args.dim != 2:
             raise ValueError("the linear example requires --dim 2")
@@ -293,6 +303,16 @@ def _make_drift(args: Any) -> Callable[[torch.Tensor], torch.Tensor]:
 def _equilibria(args: Any) -> np.ndarray:
     if args.game == "cournot" and args.cournot_b == 1.0 and args.cournot_mu == 2.0:
         return np.asarray([[0.0, 0.0], [0.5, 0.5]])
+    if args.game == "cournot3" and args.cournot_b == 1.0 and args.cournot_mu == 2.0:
+        return np.asarray(
+            [
+                [0.0, 0.0, 0.0],
+                [3.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0],
+                [0.5, 0.5, 0.0],
+                [0.5, 0.0, 0.5],
+                [0.0, 0.5, 0.5],
+            ]
+        )
     if args.game == "linear":
         return np.asarray([[args.linear_target, args.linear_target]])
     return np.empty((0, 2))
@@ -345,35 +365,82 @@ def _plot_snapshots(
     count = len(times)
     columns = min(3, count)
     rows = int(math.ceil(count / columns))
-    figure, axes = plt.subplots(rows, columns, figsize=(3.7 * columns, 3.5 * rows))
+    dim = snapshots.shape[-1]
+    if dim not in (2, 3):
+        raise ValueError("snapshot plotting currently supports only d=2 or d=3")
+    subplot_kw = {"projection": "3d"} if dim == 3 else {}
+    figure, axes = plt.subplots(
+        rows,
+        columns,
+        figsize=(3.7 * columns, 3.7 * rows),
+        subplot_kw=subplot_kw,
+    )
     axes_array = np.asarray(axes).reshape(-1)
     labels = "abcdefghijklmnopqrstuvwxyz"
+    point_count = snapshots.shape[1]
+    point_size = 5.0 if point_count <= 1000 else 1.8
+    point_alpha = 0.45 if point_count <= 1000 else 0.28
     for index, (axis, particles, time_value) in enumerate(
         zip(axes_array, snapshots, times)
     ):
-        axis.scatter(
-            particles[:, 0], particles[:, 1], s=4, alpha=0.35,
-            color="#1786c7", edgecolors="none", rasterized=True,
-        )
-        if equilibria.size:
+        if dim == 3:
             axis.scatter(
-                equilibria[:, 0], equilibria[:, 1], s=28,
-                color="red", marker=".", zorder=5,
+                particles[:, 0],
+                particles[:, 1],
+                particles[:, 2],
+                s=point_size,
+                alpha=point_alpha,
+                color="#1786c7",
+                edgecolors="none",
+                rasterized=True,
+            )
+            if equilibria.size:
+                axis.scatter(
+                    equilibria[:, 0],
+                    equilibria[:, 1],
+                    equilibria[:, 2],
+                    s=24,
+                    color="red",
+                    marker=".",
+                    depthshade=False,
+                )
+            axis.set_zlim(plot_low, plot_high)
+            axis.set_zlabel(r"$x_3$", labelpad=1)
+            axis.set_box_aspect((1, 1, 1))
+            axis.view_init(elev=24, azim=-55)
+            axis.text2D(
+                0.5,
+                -0.18,
+                f"({labels[index]}) $t={time_value:g}$",
+                transform=axis.transAxes,
+                ha="center",
+                va="top",
+                fontsize=10,
+            )
+        else:
+            axis.scatter(
+                particles[:, 0], particles[:, 1], s=4, alpha=0.35,
+                color="#1786c7", edgecolors="none", rasterized=True,
+            )
+            if equilibria.size:
+                axis.scatter(
+                    equilibria[:, 0], equilibria[:, 1], s=28,
+                    color="red", marker=".", zorder=5,
+                )
+            axis.set_aspect("equal", adjustable="box")
+            axis.text(
+                0.5,
+                -0.29,
+                f"({labels[index]}) $t={time_value:g}$",
+                transform=axis.transAxes,
+                ha="center",
+                va="top",
+                fontsize=10,
             )
         axis.set_xlim(plot_low, plot_high)
         axis.set_ylim(plot_low, plot_high)
-        axis.set_aspect("equal", adjustable="box")
         axis.set_xlabel(r"$x_1$")
         axis.set_ylabel(r"$x_2$")
-        axis.text(
-            0.5,
-            -0.29,
-            f"({labels[index]}) $t={time_value:g}$",
-            transform=axis.transAxes,
-            ha="center",
-            va="top",
-            fontsize=10,
-        )
         axis.grid(alpha=0.45)
     for axis in axes_array[count:]:
         axis.set_visible(False)
@@ -396,8 +463,8 @@ def _plot_summary(
     """Plot mean strategies plus projection and coefficient diagnostics."""
 
     figure, axes = plt.subplots(1, 3, figsize=(13, 3.8))
-    axes[0].plot(times, means[:, 0], label="mean x1")
-    axes[0].plot(times, means[:, 1], label="mean x2")
+    for component in range(means.shape[1]):
+        axes[0].plot(times, means[:, component], label=f"mean x{component + 1}")
     axes[0].set_title(f"{game} particle means")
     axes[0].legend()
     axes[1].semilogy(times[1:], np.maximum(residuals, 1e-16))

@@ -2,10 +2,9 @@
 
 ## Goal
 
-The revised project targets the supplied Figures 4.2 and 4.3 rather than a
-generic game example. It runs the unnormalized Neural–DTB scheme for the
-two-player non-potential Cournot game already defined in the original
-repository and generates point-cloud panels at the same six times.
+The revised project targets the supplied two-player Figures 4.2/4.3 and
+three-player Figures 4.5/4.6. It runs the unnormalized Neural–DTB scheme and
+generates point-cloud panels at the same six times.
 
 ## Model reconstructed from the supplied material
 
@@ -24,6 +23,17 @@ The two initial laws are uniform on `[0,1]^2` and Gaussian with mean
 `(0.5,0.5)` and covariance `0.03 I`. The caption reports noise amplitudes
 `sigma_1=sigma_2=0.1`. Under the SDE convention this gives the supplied
 algorithm's Fokker–Planck matrix `D=0.01 I`.
+
+For the three-player case, define `r_i=sum_{j != i}x_j`. The drift is
+
+```text
+b_i(x) = -2 b x_i + 2 b mu r_i - 2 b mu r_i^2,
+```
+
+again with `b=1` and `mu=2`. It vanishes at the five reported equilibria:
+the origin, `(3/8,3/8,3/8)`, and the three permutations of `(1/2,1/2,0)`.
+The source uses uniform initial samples on `[0,1]^3` and noise amplitude `0.1`
+for every coordinate.
 
 ## Neural–DTB calculation
 
@@ -52,6 +62,7 @@ values `x_i^k=X_k(z_i)`.
 - Figure-style 2-by-3 point-cloud panels with both equilibria marked red.
 - Direct Euler–Maruyama simulation of the same SDE as an independent baseline.
 - A single script that runs both Figure 4.2 and Figure 4.3 initializations.
+- A separate stable 3D driver and 3D six-panel renderer for Figures 4.5/4.6.
 - Reference folder containing the original TeX algorithm and supplied image.
 - GitHub-first Colab tutorial and notebook.
 
@@ -64,7 +75,7 @@ unchanged; all additions live under `dtb_game_dynamics_unnormalized/`.
 
 ## Validation
 
-Nine tests cover:
+Twelve tests cover:
 
 - unnormalized stacking;
 - tangent-span least-squares recovery;
@@ -72,14 +83,17 @@ Nine tests cover:
 - Gaussian density and score formulas;
 - uniform-box interior score;
 - both reported Cournot equilibria;
+- all five reported three-player equilibria and the origin's unstable
+  direction;
+- a finite end-to-end three-dimensional Neural–DTB step;
 - conversion of `sigma=0.1` to `D_ii=0.01`;
 - the six requested snapshot indices;
 - invariance under zero drift and zero diffusion.
 
-An end-to-end run of both initializations produced all six finite DTB and SDE
-snapshot panels. The point clouds contract toward `(0.5,0.5)` qualitatively as
-in the target. This is a software smoke validation, not yet a convergence or
-error analysis.
+End-to-end 2D and 3D runs produced all six finite DTB and SDE snapshot panels.
+The 2D clouds contract toward `(0.5,0.5)`, while the 3D uniform cube develops
+the target's inward triangular geometry. This is software smoke validation,
+not yet a convergence or error analysis.
 
 ## Reproducibility caveat
 
@@ -88,3 +102,7 @@ basis size, time step, or SVD tolerance. The project therefore distinguishes
 between a fast Colab preset and a denser `--paper-scale` preset and records all
 actual values in each run's `config.json`. Quantitative replication should be
 updated if the missing source parameters become available.
+
+The 3D score equation is more numerically sensitive than the 2D case. A
+coarse `h=0.02` trial diverged near `t=1`; the published 3D preset uses
+`h=0.005`, 200 steps, `m=128`, and `svd_rtol=1e-4`.

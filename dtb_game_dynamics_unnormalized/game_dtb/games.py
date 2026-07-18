@@ -17,10 +17,41 @@ def cournot_duopoly_drift(
 
     if x.shape[-1] != 2:
         raise ValueError("the Cournot game requires dim=2")
-    x1, x2 = x[..., 0], x[..., 1]
-    drift1 = -2.0 * b * x1 + 2.0 * b * mu * x2 - 2.0 * b * mu * x2.square()
-    drift2 = -2.0 * b * x2 + 2.0 * b * mu * x1 - 2.0 * b * mu * x1.square()
-    return torch.stack((drift1, drift2), dim=-1)
+    return cournot_multiplayer_drift(x, b=b, mu=mu)
+
+
+def cournot_three_player_drift(
+    x: torch.Tensor, b: float = 1.0, mu: float = 2.0
+) -> torch.Tensor:
+    """Three-player non-potential Cournot best-response drift.
+
+    For player ``i``, let ``r_i=sum_{j != i} x_j``.  Then
+
+    ``b_i(x) = -2 b x_i + 2 b mu r_i - 2 b mu r_i^2``.
+
+    With ``b=1`` and ``mu=2`` the known equilibria in the supplied source are
+    ``(0,0,0)``, ``(3/8,3/8,3/8)``, and the three permutations of
+    ``(1/2,1/2,0)``.
+    """
+
+    if x.shape[-1] != 3:
+        raise ValueError("the three-player Cournot game requires dim=3")
+    return cournot_multiplayer_drift(x, b=b, mu=mu)
+
+
+def cournot_multiplayer_drift(
+    x: torch.Tensor, b: float = 1.0, mu: float = 2.0
+) -> torch.Tensor:
+    """Dimension-independent form of the Cournot response field."""
+
+    if x.shape[-1] < 2:
+        raise ValueError("the multiplayer Cournot game needs at least two players")
+    opponents_total = x.sum(dim=-1, keepdim=True) - x
+    return (
+        -2.0 * b * x
+        + 2.0 * b * mu * opponents_total
+        - 2.0 * b * mu * opponents_total.square()
+    )
 
 
 def linear_quadratic_drift(

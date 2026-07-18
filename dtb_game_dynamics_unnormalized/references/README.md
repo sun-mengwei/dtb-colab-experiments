@@ -9,6 +9,10 @@ beside the implementation so they can be read together.
   discrete Neural--DTB algorithm supplied for this project.
 - `target_figures_4_2_4_3.png`: the supplied screenshot of the desired
   uniform- and Gaussian-initialized game results.
+- `three_player_game_definition.png`: the supplied three-player payoff,
+  cost, and known-equilibria pages.
+- `target_figures_4_5_4_6.png`: the supplied best-response and pushforward-map
+  point clouds for the three-player game.
 
 ## Target experiment read from the figure
 
@@ -32,3 +36,29 @@ and Euler step are not visible in the supplied screenshot. The replication
 script therefore offers a documented Colab-scale configuration and a denser
 `--paper-scale` configuration. These are implementation choices, not claimed
 values from the source document.
+
+## Three-player target
+
+For each player let `r_i=sum_{j != i} x_j`. The best-response drift consistent
+with the displayed payoff construction, the two-player implementation, and all
+five listed equilibria is
+
+```text
+b_i(x) = -2 b x_i + 2 b mu r_i - 2 b mu r_i^2,
+b=1, mu=2.
+```
+
+The known equilibria are
+
+```text
+(0,0,0)
+(3/8,3/8,3/8)
+(1/2,1/2,0)
+(1/2,0,1/2)
+(0,1/2,1/2)
+```
+
+The source states that the origin is unstable and the other known equilibria
+are asymptotically stable. Figures 4.5 and 4.6 use uniform initial samples on
+`[0,1]^3`, `sigma_1=sigma_2=sigma_3=0.1`, and the same six snapshot times from
+`t=0` through `t=1`.

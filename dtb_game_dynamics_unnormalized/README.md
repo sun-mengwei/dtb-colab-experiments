@@ -10,6 +10,10 @@ code in [`references/`](references/README.md):
 
 ![Target Figures 4.2 and 4.3](references/target_figures_4_2_4_3.png)
 
+The same engine also computes the supplied three-player Figures 4.5 and 4.6:
+
+![Target Figures 4.5 and 4.6](references/target_figures_4_5_4_6.png)
+
 No original Deep Tangent Bundle file is modified. The project reuses the
 original flat-parameter/restricted-Jacobian pattern, truncated-SVD approach,
 and Cournot drift in a separate package.
@@ -39,6 +43,20 @@ The last line follows the SDE/Fokker–Planck convention
 `dX=b(X)dt+sigma dW`. Use `--diffusion-entry 0.1` if the underlying source
 instead defines the caption's `0.1` as an entry of `D` itself.
 
+### Three-player game
+
+Let `r_i` be the sum of the other two players' strategies. The implemented
+three-player drift is
+
+```text
+b_i(x) = -2 b x_i + 2 b mu r_i - 2 b mu r_i^2,
+b=1, mu=2.
+```
+
+Its five listed equilibria are the origin, `(3/8,3/8,3/8)`, and the three
+permutations of `(1/2,1/2,0)`. The 3D target uses uniform samples on `[0,1]^3`,
+noise amplitudes `sigma_1=sigma_2=sigma_3=0.1`, and the same six times.
+
 ## Fastest replication
 
 Create an environment and install dependencies:
@@ -60,6 +78,16 @@ Run both target experiments with Colab-friendly settings:
 ```bash
 python replicate_thesis_figures.py --device auto
 ```
+
+Run the three-player case:
+
+```bash
+python replicate_three_player_game.py --device auto
+```
+
+A completed 256-particle result is included under
+[`verified_results/three_player_n256/`](verified_results/README.md) so the 3D
+panels and raw arrays can be inspected without rerunning Colab.
 
 This creates:
 
@@ -94,6 +122,13 @@ exact network width, particle count, tangent basis, Euler step, and SVD cutoff
 are not visible in the supplied screenshot, so these values are documented
 replication choices rather than claimed source parameters. Override the point
 count with `--particles` when needed.
+
+For the numerically stiffer 3D score transport, the validated preset uses
+`h=0.005`, 200 steps, `m=128`, and `svd_rtol=1e-4`:
+
+```bash
+python replicate_three_player_game.py --paper-scale --device auto
+```
 
 ## Run one initialization only
 
@@ -159,11 +194,13 @@ log density, and score using exact automatic differentiation of `grad u`,
 
 ```text
 references/                    supplied TeX algorithm, target image, notes
+verified_results/              checked 3D result, raw arrays, configuration
 game_dtb/                      reusable Neural–DTB implementation
-tests/                         nine mathematical/integration tests
+tests/                         twelve mathematical/integration tests
 examples/custom_game.py        instructional custom game
 run_game_dynamics.py           configurable single experiment
 replicate_thesis_figures.py    one-command Figures 4.2/4.3 workflow
+replicate_three_player_game.py one-command Figures 4.5/4.6 workflow
 COLAB_TUTORIAL.md               GitHub-to-Colab instructions
 notebooks/                      executable Colab notebook
 SUMMARY.md                      technical assumptions and validation
@@ -182,6 +219,8 @@ the direct SDE baseline and run refinement studies.
 - Uniform density has zero score only in the box interior and a nonsmooth
   boundary. The implementation uses the interior score for sampled points.
 - The scheme is explicit Euler and has no adaptive time step.
+- The 3D problem is numerically stiffer; the rejected `h=0.02` trial diverged
+  near `t=1`, so the published preset uses `h=0.005`.
 - The source screenshot does not expose every training/numerical parameter.
 - The neural parameters stay fixed because the supplied algorithm does not
   prescribe the original Allen–Cahn periodic reset/refit rule.

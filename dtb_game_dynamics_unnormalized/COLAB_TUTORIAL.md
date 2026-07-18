@@ -1,4 +1,4 @@
-# Colab Tutorial: Reproduce Figures 4.2 and 4.3 from GitHub
+# Colab Tutorial: Reproduce the 2D and 3D Games from GitHub
 
 Colab **clones** source code from GitHub into temporary runtime storage. Google
 Drive is mounted later only to preserve generated outputs.
@@ -47,6 +47,8 @@ The code folder now contains:
 ```text
 references/dtb_game_dynamics_unnormalized_dimensions.tex
 references/target_figures_4_2_4_3.png
+references/three_player_game_definition.png
+references/target_figures_4_5_4_6.png
 references/README.md
 ```
 
@@ -55,6 +57,8 @@ Display the target:
 ```python
 from IPython.display import Image, display
 display(Image("references/target_figures_4_2_4_3.png"))
+display(Image("references/three_player_game_definition.png"))
+display(Image("references/target_figures_4_5_4_6.png"))
 ```
 
 Print the reference notes:
@@ -82,7 +86,7 @@ if torch.cuda.is_available():
 !python -m pytest
 ```
 
-Expected: `9 passed`.
+Expected: `12 passed`.
 
 ## 5. Run both replications
 
@@ -136,7 +140,27 @@ print("final retained rank:", data["retained_ranks"][-1])
 print("final alpha norm:", data["alpha_norms"][-1])
 ```
 
-## 8. Optional denser run
+## 8. Run the three-player game
+
+```python
+!python replicate_three_player_game.py \
+  --device auto \
+  --output-dir outputs/colab_three_player
+```
+
+Display the Neural–DTB and direct SDE panels:
+
+```python
+display(Image("outputs/colab_three_player/dtb_snapshots.png"))
+display(Image("outputs/colab_three_player/sde_baseline_snapshots.png"))
+display(Image("outputs/colab_three_player/diagnostics.png"))
+```
+
+The red markers show the origin, `(3/8,3/8,3/8)`, and the permutations of
+`(1/2,1/2,0)`. The validated 3D preset uses `h=0.005`, 200 steps, `m=128`, and
+`svd_rtol=1e-4` because the coarser 2D time step is unstable for this case.
+
+## 9. Optional denser runs
 
 Only start this after the fast run succeeds:
 
@@ -147,13 +171,17 @@ if RUN_PAPER_SCALE:
       --paper-scale \
       --device auto \
       --output-root outputs/paper_scale
+    !python replicate_three_player_game.py \
+      --paper-scale \
+      --device auto \
+      --output-dir outputs/paper_scale_three_player
 ```
 
 The denser preset uses `N=5000`, `m=256`, `h=0.01`, and 100 steps. These are
 documented replication choices because the exact source values are not visible
 in the supplied screenshot.
 
-## 9. Save results to Drive
+## 10. Save results to Drive
 
 Colab runtime files disappear when the session ends:
 
@@ -163,11 +191,13 @@ drive.mount("/content/drive")
 ```
 
 ```python
-!zip -qr dtb_game_replication.zip outputs/colab_replication
+!zip -qr dtb_game_replication.zip \
+  outputs/colab_replication \
+  outputs/colab_three_player
 !cp dtb_game_replication.zip "/content/drive/MyDrive/"
 ```
 
-## 10. Pull later changes
+## 11. Pull later changes
 
 ```python
 %cd /content/dtb-colab-experiments

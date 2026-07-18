@@ -11,7 +11,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Neural--DTB distributional game dynamics with score transport"
     )
-    parser.add_argument("--game", choices=("linear", "cournot"), default="cournot")
+    parser.add_argument(
+        "--game", choices=("linear", "cournot", "cournot3"), default="cournot"
+    )
     parser.add_argument("--dim", type=int, default=2)
     parser.add_argument("--particles", type=int, default=256, help="particle count N")
     parser.add_argument("--steps", type=int, default=50, help="Euler step count K")

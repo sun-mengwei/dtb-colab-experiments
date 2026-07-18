@@ -2,7 +2,7 @@ import math
 
 import torch
 
-from game_dtb.games import cournot_duopoly_drift
+from game_dtb.games import cournot_duopoly_drift, cournot_three_player_drift
 from game_dtb.runner import diffusion_entry_from_noise, snapshot_schedule
 
 
@@ -10,6 +10,27 @@ def test_target_cournot_equilibria() -> None:
     equilibria = torch.tensor([[0.0, 0.0], [0.5, 0.5]], dtype=torch.float64)
     drift = cournot_duopoly_drift(equilibria, b=1.0, mu=2.0)
     assert torch.allclose(drift, torch.zeros_like(drift))
+
+
+def test_three_player_cournot_equilibria() -> None:
+    equilibria = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],
+            [3.0 / 8.0, 3.0 / 8.0, 3.0 / 8.0],
+            [0.5, 0.5, 0.0],
+            [0.5, 0.0, 0.5],
+            [0.0, 0.5, 0.5],
+        ],
+        dtype=torch.float64,
+    )
+    drift = cournot_three_player_drift(equilibria, b=1.0, mu=2.0)
+    assert torch.allclose(drift, torch.zeros_like(drift))
+
+
+def test_three_player_origin_has_unstable_direction() -> None:
+    origin = torch.zeros(3, dtype=torch.float64)
+    jacobian = torch.func.jacrev(lambda x: cournot_three_player_drift(x))(origin)
+    assert bool((torch.linalg.eigvals(jacobian).real > 0).any())
 
 
 def test_thesis_noise_amplitude_gives_algorithm_diffusion() -> None:
