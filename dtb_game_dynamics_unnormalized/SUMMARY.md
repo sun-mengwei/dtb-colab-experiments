@@ -86,6 +86,8 @@ values `x_i^k=X_k(z_i)`.
 - A separate stable 3D driver and 3D six-panel renderer for Figures 4.5/4.6.
 - A five-player driver, symmetry projection, full pairwise-coordinate plot,
   and matched depth-2/depth-4 comparison.
+- A frozen-feature MMNN whose `W,b` parameters stay outside the tangent pool,
+  plus a matched 500-sample comparison against the ordinary MLP.
 - Reference folder containing the original TeX algorithm and supplied image.
 - GitHub-first Colab tutorial and notebook.
 
@@ -98,7 +100,7 @@ unchanged; all additions live under `dtb_game_dynamics_unnormalized/`.
 
 ## Validation
 
-Eighteen tests cover:
+Twenty tests cover:
 
 - unnormalized stacking;
 - tangent-span least-squares recovery;
@@ -113,6 +115,8 @@ Eighteen tests cover:
 - conversion of `sigma=0.1` to `D_ii=0.01`;
 - the six requested snapshot indices;
 - invariance under zero drift and zero diffusion.
+- MMNN trainable/frozen parameter separation, output shape, and tanh
+  saturation diagnostics.
 
 End-to-end 2D, 3D, and 5D runs produced finite six-time DTB panels; the 2D/3D
 presets and the five-player depth-2 run also produced direct SDE panels.
@@ -127,6 +131,15 @@ distances to the nearest known equilibrium were `0.2512` and `0.2515`, and
 `12.7%` and `13.0%` were within radius `0.15`. The near equality indicates
 that additional depth did not materially change this run. Since the known
 equilibria are all unstable, the lack of concentration at them is expected.
+
+In the single-seed three-player `N=500` pilot, the ordinary MLP had 1,283
+tangent-eligible parameters and the rank-8 MMNN had 363; each run selected
+`m=128`. The MLP gave a lower mean residual over time (`0.286` versus `0.409`),
+a smaller median final distance to the stable equilibria (`0.101` versus
+`0.135`), and more samples within radius `0.15` (`68.6%` versus `57.8%`). The
+MMNN had a slightly lower residual at the final step (`0.609` versus `0.639`).
+Neither initialization contained units with `tanh'(z)<0.05`, so this comparison
+did not exhibit tanh saturation. Multiple seeds and MMNN ranks are still needed.
 
 ## Reproducibility caveat
 

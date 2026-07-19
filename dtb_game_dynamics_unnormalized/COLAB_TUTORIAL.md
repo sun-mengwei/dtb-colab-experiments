@@ -88,7 +88,7 @@ if torch.cuda.is_available():
 !python -m pytest
 ```
 
-Expected: `18 passed`.
+Expected: `20 passed`.
 
 ## 5. Run both replications
 
@@ -243,7 +243,30 @@ projection `x1` versus `mean(x2,...,x5)`; use `pairwise_final.png` to inspect
 all coordinate pairs. Exact comparison values are saved in
 `outputs/five_player_depth_comparison/depth_metrics.csv`.
 
-## 12. Optional denser tangent basis
+## 12. Compare the ordinary MLP with a frozen-feature MMNN
+
+This small pilot uses the same 500 particles and `m=128` for both models. The
+MMNN has width 32, rank 8, and two blocks. Only its `A,c` parameters can be
+selected as tangents; its random-feature `W,b` parameters remain frozen.
+
+```python
+!python compare_three_player_architectures.py \
+  --particles 500 --width 32 --rank 8 --depth 2 \
+  --basis-size 128 --svd-rtol 1e-3 --device auto \
+  --output-root outputs/three_player_mlp_mmnn_n500
+```
+
+```python
+display(Image("outputs/three_player_mlp_mmnn_n500/architecture_comparison.png"))
+display(Image("outputs/three_player_mlp_mmnn_n500/mmnn/dtb_snapshots.png"))
+display(pd.read_csv("outputs/three_player_mlp_mmnn_n500/architecture_metrics.csv"))
+```
+
+Each `config.json` records the tangent-eligible names, frozen names, and tanh
+saturation fractions. This is a one-seed pilot, not a final architecture
+ranking.
+
+## 13. Optional denser tangent basis
 
 Only start this after the fast run succeeds:
 
@@ -265,7 +288,7 @@ paper-scale preset uses `m=256`, `h=0.005`, and 200 steps. These are documented
 replication choices because the exact source values are not visible in the
 supplied screenshot.
 
-## 13. Save results to Drive
+## 14. Save results to Drive
 
 Colab runtime files disappear when the session ends:
 
@@ -279,11 +302,12 @@ drive.mount("/content/drive")
   outputs/colab_replication \
   outputs/colab_three_player \
   outputs/three_player_n2000_depth4 \
-  outputs/five_player_depth_comparison
+  outputs/five_player_depth_comparison \
+  outputs/three_player_mlp_mmnn_n500
 !cp dtb_game_replication.zip "/content/drive/MyDrive/"
 ```
 
-## 14. Pull later changes
+## 15. Pull later changes
 
 ```python
 %cd /content/dtb-colab-experiments

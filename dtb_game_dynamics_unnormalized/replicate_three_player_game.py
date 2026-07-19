@@ -22,6 +22,9 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="override the number of hidden Linear+tanh blocks",
     )
+    parser.add_argument("--architecture", choices=("mlp", "mmnn"), default="mlp")
+    parser.add_argument("--rank", type=int, default=8, help="MMNN component rank")
+    parser.add_argument("--width", type=int, default=None)
     parser.add_argument(
         "--svd-rtol",
         type=float,
@@ -51,6 +54,12 @@ def experiment_args(cli: argparse.Namespace) -> SimpleNamespace:
         if cli.depth < 1:
             raise ValueError("depth must be positive")
         depth = cli.depth
+    if cli.width is not None:
+        if cli.width < 1:
+            raise ValueError("width must be positive")
+        width = cli.width
+    if cli.rank < 1:
+        raise ValueError("rank must be positive")
 
     return SimpleNamespace(
         game="cournot3",
@@ -70,6 +79,8 @@ def experiment_args(cli: argparse.Namespace) -> SimpleNamespace:
         initial_variance=0.03,
         width=width,
         depth=depth,
+        architecture=cli.architecture,
+        rank=cli.rank,
         activation="tanh",
         jacobian_chunk=jacobian_chunk,
         derivative_chunk=derivative_chunk,

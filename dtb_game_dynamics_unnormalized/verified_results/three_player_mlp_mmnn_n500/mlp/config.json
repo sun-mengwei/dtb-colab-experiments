@@ -1,0 +1,98 @@
+{
+  "game": "cournot3",
+  "dim": 3,
+  "particles": 500,
+  "steps": 200,
+  "step_size": 0.005,
+  "basis_size": 128,
+  "svd_rtol": 0.001,
+  "noise_std": 0.1,
+  "diffusion_entry": null,
+  "initial_distribution": "uniform",
+  "uniform_low": 0.0,
+  "uniform_high": 1.0,
+  "initial_mean": 0.5,
+  "initial_std": 0.15,
+  "initial_variance": 0.03,
+  "width": 32,
+  "depth": 2,
+  "activation": "tanh",
+  "jacobian_chunk": 128,
+  "derivative_chunk": 64,
+  "linear_target": 0.5,
+  "linear_contraction": 1.0,
+  "linear_rotation": 0.35,
+  "cournot_b": 1.0,
+  "cournot_mu": 2.0,
+  "snapshot_times": "0,0.2,0.4,0.6,0.8,1.0",
+  "plot_low": -0.4,
+  "plot_high": 1.0,
+  "run_sde_baseline": false,
+  "device": "cpu",
+  "dtype": "float32",
+  "seed": 0,
+  "print_every": 40,
+  "output_dir": "outputs/three_player_mlp_mmnn_n500/mlp",
+  "architecture": "mlp",
+  "rank": 8,
+  "resolved_architecture": "mlp",
+  "mmnn_rank": null,
+  "resolved_device": "cpu",
+  "torch_version": "2.13.0",
+  "trainable_parameters_M": 1283,
+  "tangent_parameter_names": [
+    "net.0.weight",
+    "net.0.bias",
+    "net.2.weight",
+    "net.2.bias",
+    "net.4.weight",
+    "net.4.bias"
+  ],
+  "frozen_parameter_names": [],
+  "actual_basis_size_m": 128,
+  "diffusion_matrix_diagonal": 0.010000000000000002,
+  "dtb_config": {
+    "step_size": 0.005,
+    "basis_size": 128,
+    "svd_rtol": 0.001,
+    "jacobian_chunk_size": 128,
+    "derivative_chunk_size": 64,
+    "seed": 0
+  },
+  "tanh_diagnostics_initial": [
+    {
+      "layer": 1,
+      "unit_values": 16000,
+      "mean_abs_preactivation": 0.19587339460849762,
+      "fraction_abs_preactivation_gt_2": 0.0,
+      "mean_tanh_derivative": 0.9432323575019836,
+      "fraction_tanh_derivative_lt_0.05": 0.0
+    },
+    {
+      "layer": 2,
+      "unit_values": 16000,
+      "mean_abs_preactivation": 0.1800197958946228,
+      "fraction_abs_preactivation_gt_2": 0.0,
+      "mean_tanh_derivative": 0.9550053477287292,
+      "fraction_tanh_derivative_lt_0.05": 0.0
+    }
+  ],
+  "tanh_diagnostics_final": [
+    {
+      "layer": 1,
+      "unit_values": 16000,
+      "mean_abs_preactivation": 0.14122657477855682,
+      "fraction_abs_preactivation_gt_2": 0.0,
+      "mean_tanh_derivative": 0.9706583023071289,
+      "fraction_tanh_derivative_lt_0.05": 0.0
+    },
+    {
+      "layer": 2,
+      "unit_values": 16000,
+      "mean_abs_preactivation": 0.13460607826709747,
+      "fraction_abs_preactivation_gt_2": 0.0,
+      "mean_tanh_derivative": 0.9757617712020874,
+      "fraction_tanh_derivative_lt_0.05": 0.0
+    }
+  ]
+}

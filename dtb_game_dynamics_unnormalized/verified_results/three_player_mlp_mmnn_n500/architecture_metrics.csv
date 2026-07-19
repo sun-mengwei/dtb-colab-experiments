@@ -1,0 +1,3 @@
+architecture,particles,trainable_tangent_parameters,selected_basis_size,mean_retained_rank,final_retained_rank,mean_projection_residual,final_projection_residual,median_nearest_stable_distance,fraction_within_0.15_of_stable,maximum_initial_saturation_fraction
+MLP,500,1283,128,27.75,20,0.28634304508566855,0.6389904022216797,0.10146639284852436,0.686,0.0
+MMNN,500,363,128,23.165,17,0.4085642042942345,0.6086263060569763,0.13534911854530776,0.578,0.0

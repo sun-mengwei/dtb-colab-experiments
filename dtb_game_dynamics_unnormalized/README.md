@@ -143,6 +143,20 @@ Both use seed 0, width 32, `m=128`, `h=0.005`, 200 steps, and uniform initial
 samples on `[0,1]^5`. The completed comparison is included under
 [`verified_results/five_player_depth_comparison/`](verified_results/five_player_depth_comparison/README.md).
 
+Run the controlled 500-sample MLP/MMNN pilot:
+
+```bash
+python compare_three_player_architectures.py \
+  --particles 500 --width 32 --rank 8 --depth 2 \
+  --basis-size 128 --svd-rtol 1e-3 --device auto
+```
+
+The MMNN uses blocks `A*tanh(W*x+b)+c`: `W,b` are frozen and excluded from the
+tangent pool, while `A,c` are tangent-eligible. Both architectures select the
+same `m=128` scalar tangent directions and start from identical particles. The
+verified single-seed result is under
+[`verified_results/three_player_mlp_mmnn_n500/`](verified_results/three_player_mlp_mmnn_n500/README.md).
+
 A completed 256-particle result is included under
 [`verified_results/three_player_n256/`](verified_results/README.md) so the 3D
 panels and raw arrays can be inspected without rerunning Colab.
@@ -255,6 +269,7 @@ log density, and score using exact automatic differentiation of `grad u`,
 | Algorithm block | Code |
 |---|---|
 | Initialization | `game_dtb/state.py` and Block 1 in `runner.py` |
+| MLP and frozen-feature MMNN models | `game_dtb/models.py` |
 | Select tangent coordinates | Block 2 in `algorithm.py` |
 | Game plus score velocity | Block 3 in `algorithm.py` |
 | Restricted Jacobians | `projection.selected_parameter_jacobian` |
@@ -272,13 +287,14 @@ log density, and score using exact automatic differentiation of `grad u`,
 references/                    supplied TeX algorithm, target images, notes
 verified_results/              checked 3D/5D results, raw arrays, configuration
 game_dtb/                      reusable Neural–DTB implementation
-tests/                         eighteen mathematical/integration tests
+tests/                         twenty mathematical/integration tests
 examples/custom_game.py        instructional custom game
 run_game_dynamics.py           configurable single experiment
 replicate_thesis_figures.py    one-command Figures 4.2/4.3 workflow
 replicate_three_player_game.py one-command Figures 4.5/4.6 workflow
 replicate_five_player_game.py  one-command Section 4.7.4 workflow
 compare_five_player_depths.py  matched depth-2/depth-4 comparison
+compare_three_player_architectures.py  500-sample MLP/MMNN pilot
 COLAB_TUTORIAL.md               GitHub-to-Colab instructions
 notebooks/                      executable Colab notebook
 SUMMARY.md                      technical assumptions and validation
@@ -310,5 +326,7 @@ the direct SDE baseline and run refinement studies.
   prescribe the original Allen–Cahn periodic reset/refit rule.
 - Strong conclusions require step-size, particle-count, tangent-basis, and SVD
   tolerance refinement.
+- The MLP/MMNN comparison is one seed and one MMNN rank. It demonstrates the
+  code path but is not a general architecture ranking.
 
 See [COLAB_TUTORIAL.md](COLAB_TUTORIAL.md) for the GitHub workflow.

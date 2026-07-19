@@ -19,7 +19,7 @@ from .games import (
     cournot_three_player_drift,
     linear_quadratic_drift,
 )
-from .models import TangentMLP
+from .models import TangentMLP, TangentMMNN
 from .state import gaussian_particle_state, uniform_box_particle_state
 
 
@@ -123,13 +123,28 @@ def run_experiment(args: Any) -> Path:
 
     # f_theta is not fitted to the solution; its selected parameter tangents
     # form the Eulerian dictionary used in Blocks 2--8 of the algorithm.
-    model = TangentMLP(
-        dim=args.dim,
-        width=args.width,
-        depth=args.depth,
-        activation=args.activation,
-        dtype=dtype,
-    ).to(device)
+    architecture = getattr(args, "architecture", "mlp")
+    if architecture == "mlp":
+        model = TangentMLP(
+            dim=args.dim,
+            width=args.width,
+            depth=args.depth,
+            activation=args.activation,
+            dtype=dtype,
+        ).to(device)
+    elif architecture == "mmnn":
+        model = TangentMMNN(
+            dim=args.dim,
+            width=args.width,
+            rank=getattr(args, "rank", 8),
+            depth=args.depth,
+            activation=args.activation,
+            dtype=dtype,
+        ).to(device)
+    else:
+        raise ValueError("architecture must be 'mlp' or 'mmnn'")
+
+    initial_activation_diagnostics = model.tanh_diagnostics(state.particles)
 
     diffusion_entry = (
         args.diffusion_entry
@@ -230,12 +245,28 @@ def run_experiment(args: Any) -> Path:
     metadata = vars(args).copy()
     metadata.update(
         {
+            "resolved_architecture": architecture,
+            "mmnn_rank": (
+                getattr(args, "rank", None) if architecture == "mmnn" else None
+            ),
             "resolved_device": str(device),
             "torch_version": torch.__version__,
             "trainable_parameters_M": method.parameter_count,
+            "tangent_parameter_names": [
+                name
+                for name, parameter in model.named_parameters()
+                if parameter.requires_grad
+            ],
+            "frozen_parameter_names": [
+                name
+                for name, parameter in model.named_parameters()
+                if not parameter.requires_grad
+            ],
             "actual_basis_size_m": min(config.basis_size, method.parameter_count),
             "diffusion_matrix_diagonal": diffusion_entry,
             "dtb_config": asdict(config),
+            "tanh_diagnostics_initial": initial_activation_diagnostics,
+            "tanh_diagnostics_final": model.tanh_diagnostics(state.particles),
         }
     )
     (output_dir / "config.json").write_text(json.dumps(metadata, indent=2) + "\n")

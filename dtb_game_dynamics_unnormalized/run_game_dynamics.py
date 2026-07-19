@@ -47,6 +47,10 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--width", type=int, default=16)
     parser.add_argument("--depth", type=int, default=2)
+    parser.add_argument("--architecture", choices=("mlp", "mmnn"), default="mlp")
+    parser.add_argument(
+        "--rank", type=int, default=8, help="MMNN intermediate component count"
+    )
     parser.add_argument("--activation", choices=("tanh", "gelu", "silu"), default="tanh")
     parser.add_argument("--jacobian-chunk", type=int, default=128)
     parser.add_argument("--derivative-chunk", type=int, default=64)
