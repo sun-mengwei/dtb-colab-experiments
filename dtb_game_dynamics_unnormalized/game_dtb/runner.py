@@ -15,6 +15,7 @@ import torch
 from .algorithm import DTBConfig, NeuralDTBGameDynamics
 from .games import (
     cournot_duopoly_drift,
+    cournot_five_player_drift,
     cournot_three_player_drift,
     linear_quadratic_drift,
 )
@@ -270,11 +271,20 @@ def run_experiment(args: Any) -> Path:
         np.asarray(alpha_norms),
         args.game,
     )
+    if args.dim == 5:
+        _plot_pairwise_final(
+            output_dir / "pairwise_final.png",
+            final_particles,
+            equilibria,
+            equilibrium_is_stable,
+        )
     print(f"saved {history_path}")
     print(f"saved {output_dir / 'dtb_snapshots.png'}")
     if baseline_snapshots is not None:
         print(f"saved {output_dir / 'sde_baseline_snapshots.png'}")
     print(f"saved {output_dir / 'diagnostics.png'}")
+    if args.dim == 5:
+        print(f"saved {output_dir / 'pairwise_final.png'}")
     return output_dir
 
 
@@ -289,6 +299,12 @@ def _make_drift(args: Any) -> Callable[[torch.Tensor], torch.Tensor]:
         if args.dim != 3:
             raise ValueError("the three-player Cournot example requires --dim 3")
         return lambda x: cournot_three_player_drift(
+            x, b=args.cournot_b, mu=args.cournot_mu
+        )
+    if args.game == "cournot5":
+        if args.dim != 5:
+            raise ValueError("the five-player Cournot example requires --dim 5")
+        return lambda x: cournot_five_player_drift(
             x, b=args.cournot_b, mu=args.cournot_mu
         )
     if args.game == "linear":
@@ -316,6 +332,14 @@ def _equilibria(args: Any) -> np.ndarray:
                 [0.0, 0.5, 0.5],
             ]
         )
+    if args.game == "cournot5" and args.cournot_b == 1.0 and args.cournot_mu == 2.0:
+        symmetric = np.full(5, 7.0 / 32.0)
+        one_zero = []
+        for zero_index in range(5):
+            equilibrium = np.full(5, 5.0 / 18.0)
+            equilibrium[zero_index] = 0.0
+            one_zero.append(equilibrium)
+        return np.vstack([np.zeros(5), symmetric, np.asarray(one_zero)])
     if args.game == "linear":
         return np.asarray([[args.linear_target, args.linear_target]])
     return np.empty((0, 2))
@@ -328,6 +352,8 @@ def _equilibrium_stability(args: Any) -> np.ndarray:
         return np.asarray([False, True], dtype=bool)
     if args.game == "cournot3" and args.cournot_b == 1.0 and args.cournot_mu == 2.0:
         return np.asarray([False, True, True, True, True], dtype=bool)
+    if args.game == "cournot5" and args.cournot_b == 1.0 and args.cournot_mu == 2.0:
+        return np.zeros(7, dtype=bool)
     if args.game == "linear":
         return np.asarray([True], dtype=bool)
     return np.empty((0,), dtype=bool)
@@ -382,8 +408,8 @@ def _plot_snapshots(
     columns = min(3, count)
     rows = int(math.ceil(count / columns))
     dim = snapshots.shape[-1]
-    if dim not in (2, 3):
-        raise ValueError("snapshot plotting currently supports only d=2 or d=3")
+    if dim not in (2, 3, 5):
+        raise ValueError("snapshot plotting currently supports d=2, d=3, or d=5")
     if equilibrium_is_stable.shape != (len(equilibria),):
         raise ValueError("equilibrium stability labels must align with equilibria")
     subplot_kw = {"projection": "3d"} if dim == 3 else {}
@@ -447,6 +473,49 @@ def _plot_snapshots(
                 va="top",
                 fontsize=10,
             )
+        elif dim == 5:
+            opponents_mean = particles[:, 1:].mean(axis=1)
+            axis.scatter(
+                particles[:, 0], opponents_mean, s=point_size, alpha=point_alpha,
+                color="#1786c7", edgecolors="none", rasterized=True,
+            )
+            if equilibria.size:
+                projected = np.column_stack(
+                    [equilibria[:, 0], equilibria[:, 1:].mean(axis=1)]
+                )
+                stable = projected[equilibrium_is_stable]
+                unstable = projected[~equilibrium_is_stable]
+                if stable.size:
+                    axis.scatter(
+                        stable[:, 0], stable[:, 1], s=38,
+                        color="#d62728", marker="o", zorder=5,
+                        label=(
+                            f"stable equilibria ({len(stable)})"
+                            if index == 0 else "_nolegend_"
+                        ),
+                    )
+                if unstable.size:
+                    axis.scatter(
+                        unstable[:, 0], unstable[:, 1], s=68,
+                        color="#ffbf00", edgecolors="#222222", linewidths=0.7,
+                        marker="X", zorder=6,
+                        label=(
+                            f"known unstable equilibria ({len(unstable)}; projected)"
+                            if index == 0 else "_nolegend_"
+                        ),
+                    )
+            axis.set_aspect("equal", adjustable="box")
+            axis.set_xlabel(r"$x_1$")
+            axis.set_ylabel(r"mean$(x_2,\ldots,x_5)$")
+            axis.text(
+                0.5,
+                -0.29,
+                f"({labels[index]}) $t={time_value:g}$",
+                transform=axis.transAxes,
+                ha="center",
+                va="top",
+                fontsize=10,
+            )
         else:
             axis.scatter(
                 particles[:, 0], particles[:, 1], s=4, alpha=0.35,
@@ -486,8 +555,9 @@ def _plot_snapshots(
             )
         axis.set_xlim(plot_low, plot_high)
         axis.set_ylim(plot_low, plot_high)
-        axis.set_xlabel(r"$x_1$")
-        axis.set_ylabel(r"$x_2$")
+        if dim != 5:
+            axis.set_xlabel(r"$x_1$")
+            axis.set_ylabel(r"$x_2$")
         axis.grid(alpha=0.45)
     for axis in axes_array[count:]:
         axis.set_visible(False)
@@ -504,6 +574,81 @@ def _plot_snapshots(
         )
     figure.subplots_adjust(
         left=0.07, right=0.98, bottom=0.10, top=0.84, wspace=0.34, hspace=0.68
+    )
+    figure.savefig(path, dpi=180)
+    plt.close(figure)
+
+
+def _plot_pairwise_final(
+    path: Path,
+    particles: np.ndarray,
+    equilibria: np.ndarray,
+    equilibrium_is_stable: np.ndarray,
+) -> None:
+    """Show every coordinate and coordinate pair for a five-dimensional run."""
+
+    if particles.ndim != 2 or particles.shape[1] != 5:
+        raise ValueError("pairwise plotting requires particles with shape (N,5)")
+    if equilibrium_is_stable.shape != (len(equilibria),):
+        raise ValueError("equilibrium stability labels must align with equilibria")
+
+    figure, axes = plt.subplots(5, 5, figsize=(12, 12))
+    for row in range(5):
+        for column in range(5):
+            axis = axes[row, column]
+            if row == column:
+                axis.hist(
+                    particles[:, column], bins=45, density=True,
+                    color="#1786c7", alpha=0.65,
+                )
+                for value in np.unique(equilibria[:, column]):
+                    axis.axvline(value, color="#ffbf00", linewidth=1.0, alpha=0.85)
+                axis.set_xlim(-0.4, 1.0)
+            elif row > column:
+                axis.scatter(
+                    particles[:, column], particles[:, row],
+                    s=2.0, alpha=0.20, color="#1786c7",
+                    edgecolors="none", rasterized=True,
+                )
+                stable = equilibria[equilibrium_is_stable]
+                unstable = equilibria[~equilibrium_is_stable]
+                if stable.size:
+                    axis.scatter(
+                        stable[:, column], stable[:, row], s=30,
+                        color="#d62728", marker="o", zorder=5,
+                        label="stable equilibria",
+                    )
+                if unstable.size:
+                    axis.scatter(
+                        unstable[:, column], unstable[:, row], s=48,
+                        color="#ffbf00", edgecolors="#222222", linewidths=0.6,
+                        marker="X", zorder=6, label="known unstable equilibria",
+                    )
+                axis.set_xlim(-0.4, 1.0)
+                axis.set_ylim(-0.4, 1.0)
+            else:
+                correlation = np.corrcoef(particles[:, column], particles[:, row])[0, 1]
+                axis.text(
+                    0.5, 0.5, rf"$\rho={correlation:.2f}$",
+                    transform=axis.transAxes, ha="center", va="center",
+                )
+                axis.set_axis_off()
+
+            if row == 4:
+                axis.set_xlabel(rf"$x_{column + 1}$")
+            if column == 0 and row != 0:
+                axis.set_ylabel(rf"$x_{row + 1}$")
+            axis.grid(alpha=0.20)
+
+    handles, labels = axes[1, 0].get_legend_handles_labels()
+    if handles:
+        figure.legend(
+            handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.965),
+            ncol=min(2, len(handles)), frameon=False,
+        )
+    figure.suptitle("Five-player Neural--DTB: final pairwise projections", y=0.995)
+    figure.subplots_adjust(
+        left=0.08, right=0.98, bottom=0.07, top=0.93, wspace=0.12, hspace=0.12
     )
     figure.savefig(path, dpi=180)
     plt.close(figure)

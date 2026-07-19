@@ -1,4 +1,4 @@
-# Neural–DTB Replication of a 2D Non-Potential Game
+# Neural–DTB Replication of 2D, 3D, and 5D Non-Potential Games
 
 This self-contained folder implements the supplied unnormalized Neural–DTB
 algorithm and uses it to reproduce the qualitative behavior of target Figures
@@ -13,6 +13,11 @@ code in [`references/`](references/README.md):
 The same engine also computes the supplied three-player Figures 4.5 and 4.6:
 
 ![Target Figures 4.5 and 4.6](references/target_figures_4_5_4_6.png)
+
+It now includes the supplied five-player Section 4.7.4 case and a controlled
+`N=2000` comparison of depth-2 and depth-4 tangent networks:
+
+![Five-player source](references/five_player_game_definition.png)
 
 No original Deep Tangent Bundle file is modified. The project reuses the
 original flat-parameter/restricted-Jacobian pattern, truncated-SVD approach,
@@ -66,6 +71,22 @@ noise amplitudes `sigma_1=sigma_2=sigma_3=0.1`, and the same six times.
 Snapshot legends show the unstable origin as a gold `X` and the four stable
 equilibria as red circles.
 
+### Five-player game
+
+The five-player source lists seven known equilibria:
+
+```text
+(0,0,0,0,0)
+(7/32,7/32,7/32,7/32,7/32)
+the five permutations of (0,5/18,5/18,5/18,5/18).
+```
+
+All seven are reported unstable. The one-zero equilibria are boundary Nash
+points for nonnegative quantities: when the unconstrained best response is
+negative, it is projected to zero. The five-player drift is therefore
+`2b*(max(mu*r_i*(1-r_i),0)-x_i)`. This projection is necessary for the source's
+five one-zero points to be equilibria.
+
 ## Fastest replication
 
 Create an environment and install dependencies:
@@ -109,6 +130,18 @@ python replicate_three_player_game.py \
 Here `depth=4` means four hidden `Linear+tanh` blocks plus the final linear
 output layer. The saved result is available under
 [`verified_results/three_player_n2000_depth4/`](verified_results/three_player_n2000_depth4/README.md).
+
+Run the two matched five-player settings:
+
+```bash
+python replicate_five_player_game.py --particles 2000 --depth 2 --svd-rtol 1e-3 --output-dir outputs/five_player_depth_comparison/depth2
+python replicate_five_player_game.py --particles 2000 --depth 4 --svd-rtol 1e-3 --skip-sde-baseline --output-dir outputs/five_player_depth_comparison/depth4
+python compare_five_player_depths.py
+```
+
+Both use seed 0, width 32, `m=128`, `h=0.005`, 200 steps, and uniform initial
+samples on `[0,1]^5`. The completed comparison is included under
+[`verified_results/five_player_depth_comparison/`](verified_results/five_player_depth_comparison/README.md).
 
 A completed 256-particle result is included under
 [`verified_results/three_player_n256/`](verified_results/README.md) so the 3D
@@ -229,20 +262,23 @@ log density, and score using exact automatic differentiation of `grad u`,
 | Truncated SVD | `projection.truncated_svd_solve` |
 | Spatial score terms | `derivatives.tangent_velocity_and_spatial_terms` |
 | Euler transport | Block 9 in `algorithm.py` |
-| Six-panel replication | `runner._plot_snapshots` |
+| Six-panel 2D/3D/5D projections | `runner._plot_snapshots` |
+| Five-dimensional pairwise view | `runner._plot_pairwise_final` |
 | Direct SDE comparison | `runner.simulate_euler_maruyama` |
 
 ## Folder layout
 
 ```text
-references/                    supplied TeX algorithm, target image, notes
-verified_results/              checked 3D result, raw arrays, configuration
+references/                    supplied TeX algorithm, target images, notes
+verified_results/              checked 3D/5D results, raw arrays, configuration
 game_dtb/                      reusable Neural–DTB implementation
-tests/                         twelve mathematical/integration tests
+tests/                         eighteen mathematical/integration tests
 examples/custom_game.py        instructional custom game
 run_game_dynamics.py           configurable single experiment
 replicate_thesis_figures.py    one-command Figures 4.2/4.3 workflow
 replicate_three_player_game.py one-command Figures 4.5/4.6 workflow
+replicate_five_player_game.py  one-command Section 4.7.4 workflow
+compare_five_player_depths.py  matched depth-2/depth-4 comparison
 COLAB_TUTORIAL.md               GitHub-to-Colab instructions
 notebooks/                      executable Colab notebook
 SUMMARY.md                      technical assumptions and validation
@@ -263,6 +299,12 @@ the direct SDE baseline and run refinement studies.
 - The scheme is explicit Euler and has no adaptive time step.
 - The 3D problem is numerically stiffer; the rejected `h=0.02` trial diverged
   near `t=1`, so the published preset uses `h=0.005`.
+- A 5D distribution cannot be shown in one ordinary scatter plot. The six
+  panels use `x1` against the mean of `x2,...,x5`, and `pairwise_final.png`
+  supplies all ten coordinate-pair projections. Some equilibrium markers
+  overlap in the summary projection.
+- Because all seven reported 5D equilibria are unstable, distance to them is a
+  diagnostic rather than a convergence target.
 - The source screenshot does not expose every training/numerical parameter.
 - The neural parameters stay fixed because the supplied algorithm does not
   prescribe the original Allen–Cahn periodic reset/refit rule.

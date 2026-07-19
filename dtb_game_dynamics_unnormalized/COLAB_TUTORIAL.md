@@ -1,4 +1,4 @@
-# Colab Tutorial: Reproduce the 2D and 3D Games from GitHub
+# Colab Tutorial: Reproduce the 2D, 3D, and 5D Games from GitHub
 
 Colab **clones** source code from GitHub into temporary runtime storage. Google
 Drive is mounted later only to preserve generated outputs.
@@ -49,6 +49,7 @@ references/dtb_game_dynamics_unnormalized_dimensions.tex
 references/target_figures_4_2_4_3.png
 references/three_player_game_definition.png
 references/target_figures_4_5_4_6.png
+references/five_player_game_definition.png
 references/README.md
 ```
 
@@ -59,6 +60,7 @@ from IPython.display import Image, display
 display(Image("references/target_figures_4_2_4_3.png"))
 display(Image("references/three_player_game_definition.png"))
 display(Image("references/target_figures_4_5_4_6.png"))
+display(Image("references/five_player_game_definition.png"))
 ```
 
 Print the reference notes:
@@ -86,7 +88,7 @@ if torch.cuda.is_available():
 !python -m pytest
 ```
 
-Expected: `12 passed`.
+Expected: `18 passed`.
 
 ## 5. Run both replications
 
@@ -209,7 +211,39 @@ display(Image("outputs/three_player_n2000_depth4/diagnostics.png"))
 The unstable origin is a gold `X`; the four stable equilibria are red circles.
 Depth 4 means four hidden `Linear+tanh` blocks plus the output layer.
 
-## 11. Optional denser tangent basis
+## 11. Run the matched five-player depth comparison
+
+The two DTB runs below differ only in network depth. The depth-2 run also
+computes the direct SDE baseline; that baseline is independent of network
+depth and does not need to be repeated.
+
+```python
+!python replicate_five_player_game.py \
+  --particles 2000 --depth 2 --basis-size 128 --width 32 \
+  --svd-rtol 1e-3 --device auto \
+  --output-dir outputs/five_player_depth_comparison/depth2
+
+!python replicate_five_player_game.py \
+  --particles 2000 --depth 4 --basis-size 128 --width 32 \
+  --svd-rtol 1e-3 --skip-sde-baseline --device auto \
+  --output-dir outputs/five_player_depth_comparison/depth4
+
+!python compare_five_player_depths.py
+```
+
+```python
+display(Image("outputs/five_player_depth_comparison/depth_comparison.png"))
+display(Image("outputs/five_player_depth_comparison/depth2/dtb_snapshots.png"))
+display(Image("outputs/five_player_depth_comparison/depth4/dtb_snapshots.png"))
+display(Image("outputs/five_player_depth_comparison/depth2/pairwise_final.png"))
+```
+
+All gold `X` markers are unstable. The six-panel plot is the symmetry
+projection `x1` versus `mean(x2,...,x5)`; use `pairwise_final.png` to inspect
+all coordinate pairs. Exact comparison values are saved in
+`outputs/five_player_depth_comparison/depth_metrics.csv`.
+
+## 12. Optional denser tangent basis
 
 Only start this after the fast run succeeds:
 
@@ -231,7 +265,7 @@ paper-scale preset uses `m=256`, `h=0.005`, and 200 steps. These are documented
 replication choices because the exact source values are not visible in the
 supplied screenshot.
 
-## 12. Save results to Drive
+## 13. Save results to Drive
 
 Colab runtime files disappear when the session ends:
 
@@ -244,11 +278,12 @@ drive.mount("/content/drive")
 !zip -qr dtb_game_replication.zip \
   outputs/colab_replication \
   outputs/colab_three_player \
-  outputs/three_player_n2000_depth4
+  outputs/three_player_n2000_depth4 \
+  outputs/five_player_depth_comparison
 !cp dtb_game_replication.zip "/content/drive/MyDrive/"
 ```
 
-## 13. Pull later changes
+## 14. Pull later changes
 
 ```python
 %cd /content/dtb-colab-experiments

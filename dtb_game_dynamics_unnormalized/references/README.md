@@ -16,6 +16,8 @@ beside the implementation so they can be read together.
 - `printed_payoff_equations.png`: the later close-up of Equations 4.61--4.62.
 - `printed_payoff_derivative_check.png`: the supplied derivative check showing
   the consequence of reading the printed total literally.
+- `five_player_game_definition.png`: the supplied Section 4.7.4 screenshot
+  listing the five-player equilibria and their stability conclusion.
 
 ## Target experiment read from the figure
 
@@ -83,3 +85,22 @@ The source states that the origin is unstable and the other known equilibria
 are asymptotically stable. Figures 4.5 and 4.6 use uniform initial samples on
 `[0,1]^3`, `sigma_1=sigma_2=sigma_3=0.1`, and the same six snapshot times from
 `t=0` through `t=1`.
+
+## Five-player target
+
+The supplied Section 4.7.4 screenshot lists seven identified equilibria:
+
+```text
+(0,0,0,0,0)
+(7/32,7/32,7/32,7/32,7/32)
+(0,5/18,5/18,5/18,5/18) and its five coordinate placements
+```
+
+The last line means the five distinct permutations with one zero. The source
+states that none of these seven identified equilibria is stable.
+
+For a one-zero point the opponents' total seen by the zero player is `10/9`,
+so the raw best response `mu*r_i*(1-r_i)` is negative. The reported point is a
+Nash equilibrium only after enforcing the Cournot quantity constraint
+`x_i >= 0`. Accordingly, the five-player implementation uses
+`max(mu*r_i*(1-r_i),0)` before forming the best-response drift.

@@ -5,10 +5,12 @@ import torch
 
 from game_dtb.games import (
     cournot_duopoly_drift,
+    cournot_five_player_drift,
     cournot_multiplayer_payoff,
     cournot_three_player_drift,
 )
 from game_dtb.runner import (
+    _equilibria,
     _equilibrium_stability,
     diffusion_entry_from_noise,
     snapshot_schedule,
@@ -34,6 +36,39 @@ def test_three_player_cournot_equilibria() -> None:
     )
     drift = cournot_three_player_drift(equilibria, b=1.0, mu=2.0)
     assert torch.allclose(drift, torch.zeros_like(drift))
+
+
+def test_five_player_constrained_cournot_equilibria() -> None:
+    points = [
+        torch.zeros(5, dtype=torch.float64),
+        torch.full((5,), 7.0 / 32.0, dtype=torch.float64),
+    ]
+    for zero_index in range(5):
+        point = torch.full((5,), 5.0 / 18.0, dtype=torch.float64)
+        point[zero_index] = 0.0
+        points.append(point)
+    equilibria = torch.stack(points)
+    drift = cournot_five_player_drift(equilibria, b=1.0, mu=2.0)
+    assert torch.allclose(drift, torch.zeros_like(drift), atol=1e-12)
+
+
+def test_five_player_equilibria_and_stability_labels() -> None:
+    args = SimpleNamespace(game="cournot5", cournot_b=1.0, cournot_mu=2.0)
+    equilibria = _equilibria(args)
+    labels = _equilibrium_stability(args)
+    assert equilibria.shape == (7, 5)
+    assert labels.tolist() == [False] * 7
+
+
+def test_each_five_player_equilibrium_has_unstable_direction() -> None:
+    points = [torch.zeros(5), torch.full((5,), 7.0 / 32.0)]
+    for zero_index in range(5):
+        point = torch.full((5,), 5.0 / 18.0)
+        point[zero_index] = 0.0
+        points.append(point)
+    for point in points:
+        jacobian = torch.func.jacrev(cournot_five_player_drift)(point.to(torch.float64))
+        assert bool((torch.linalg.eigvals(jacobian).real > 0).any())
 
 
 def test_equilibrium_consistent_payoff_gradient_matches_drift() -> None:

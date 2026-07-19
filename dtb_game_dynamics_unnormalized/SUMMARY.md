@@ -2,9 +2,10 @@
 
 ## Goal
 
-The revised project targets the supplied two-player Figures 4.2/4.3 and
-three-player Figures 4.5/4.6. It runs the unnormalized Neural–DTB scheme and
-generates point-cloud panels at the same six times.
+The revised project targets the supplied two-player Figures 4.2/4.3,
+three-player Figures 4.5/4.6, and five-player Section 4.7.4. It runs the
+unnormalized Neural–DTB scheme and generates point-cloud panels at the same six
+times.
 
 ## Model reconstructed from the supplied material
 
@@ -40,6 +41,20 @@ the discrepancy is documented and tested rather than silently ignored.
 The source uses uniform initial samples on `[0,1]^3` and noise amplitude `0.1`
 for every coordinate.
 
+For five players, the source lists the origin, `(7/32)^5`, and the five
+permutations of `(0,5/18,5/18,5/18,5/18)`. Quantities are nonnegative, so the
+implemented best response is
+
+```text
+BR_i(x) = max(mu*r_i*(1-r_i), 0),
+b_i(x) = 2b*(BR_i(x)-x_i).
+```
+
+The projection is mathematically consequential: without it the zero component
+of a one-zero point would have a negative drift, contradicting the source's
+equilibrium list. Automatic-differentiation tests confirm all seven points and
+at least one unstable eigen-direction at each.
+
 ## Neural–DTB calculation
 
 At every step the code selects `m` scalar parameters of a smooth
@@ -64,10 +79,13 @@ values `x_i^k=X_k(z_i)`.
 - Exact uniform-box and Gaussian log-density/score initialization.
 - Noise-amplitude-to-diffusion conversion `D=sigma sigma^T`.
 - Snapshot capture at `t=0,0.2,0.4,0.6,0.8,1`.
-- Figure-style 2-by-3 point-cloud panels with both equilibria marked red.
+- Figure-style 2-by-3 point-cloud panels with stable equilibria as red circles
+  and unstable equilibria as gold `X` markers.
 - Direct Euler–Maruyama simulation of the same SDE as an independent baseline.
 - A single script that runs both Figure 4.2 and Figure 4.3 initializations.
 - A separate stable 3D driver and 3D six-panel renderer for Figures 4.5/4.6.
+- A five-player driver, symmetry projection, full pairwise-coordinate plot,
+  and matched depth-2/depth-4 comparison.
 - Reference folder containing the original TeX algorithm and supplied image.
 - GitHub-first Colab tutorial and notebook.
 
@@ -80,7 +98,7 @@ unchanged; all additions live under `dtb_game_dynamics_unnormalized/`.
 
 ## Validation
 
-Twelve tests cover:
+Eighteen tests cover:
 
 - unnormalized stacking;
 - tangent-span least-squares recovery;
@@ -91,14 +109,24 @@ Twelve tests cover:
 - all five reported three-player equilibria and the origin's unstable
   direction;
 - a finite end-to-end three-dimensional Neural–DTB step;
+- all seven five-player constrained equilibria and their unstable directions;
 - conversion of `sigma=0.1` to `D_ii=0.01`;
 - the six requested snapshot indices;
 - invariance under zero drift and zero diffusion.
 
-End-to-end 2D and 3D runs produced all six finite DTB and SDE snapshot panels.
+End-to-end 2D, 3D, and 5D runs produced finite six-time DTB panels; the 2D/3D
+presets and the five-player depth-2 run also produced direct SDE panels.
 The 2D clouds contract toward `(0.5,0.5)`, while the 3D uniform cube develops
 the target's inward triangular geometry. This is software smoke validation,
 not yet a convergence or error analysis.
+
+The controlled five-player experiment used `N=2000`, seed 0, width 32,
+`m=128`, `h=0.005`, 200 steps, and `svd_rtol=1e-3` for both depths. At `t=1`,
+depth 2 and depth 4 had final residuals `0.919` and `0.928`; their median
+distances to the nearest known equilibrium were `0.2512` and `0.2515`, and
+`12.7%` and `13.0%` were within radius `0.15`. The near equality indicates
+that additional depth did not materially change this run. Since the known
+equilibria are all unstable, the lack of concentration at them is expected.
 
 ## Reproducibility caveat
 

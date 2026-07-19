@@ -65,6 +65,26 @@ def cournot_three_player_drift(
     return cournot_multiplayer_drift(x, b=b, mu=mu)
 
 
+def cournot_five_player_drift(
+    x: torch.Tensor, b: float = 1.0, mu: float = 2.0
+) -> torch.Tensor:
+    """Five-player nonnegative best-response dynamics from Section 4.7.4.
+
+    The listed equilibria with one zero component satisfy the constrained
+    first-order condition rather than the unconstrained gradient equation.
+    Therefore the best response ``mu*r_i*(1-r_i)`` is projected onto the
+    nonnegative strategy set before forming ``2b*(BR_i-x_i)``.
+    """
+
+    if x.shape[-1] != 5:
+        raise ValueError("the five-player Cournot game requires dim=5")
+    opponents_total = x.sum(dim=-1, keepdim=True) - x
+    best_response = torch.clamp_min(
+        mu * opponents_total * (1.0 - opponents_total), 0.0
+    )
+    return 2.0 * b * (best_response - x)
+
+
 def cournot_multiplayer_drift(
     x: torch.Tensor, b: float = 1.0, mu: float = 2.0
 ) -> torch.Tensor:
