@@ -24,14 +24,19 @@ The two initial laws are uniform on `[0,1]^2` and Gaussian with mean
 `sigma_1=sigma_2=0.1`. Under the SDE convention this gives the supplied
 algorithm's Fokker–Planck matrix `D=0.01 I`.
 
-For the three-player case, define `r_i=sum_{j != i}x_j`. The drift is
+For the three-player case, define `r_i=sum_{j != i}x_j`. The
+equilibrium-consistent payoff and its own-action gradient are
 
 ```text
+Pi_i = -d - b x_i^2 + 2 b mu x_i r_i(1-r_i),
 b_i(x) = -2 b x_i + 2 b mu r_i - 2 b mu r_i^2,
 ```
 
 again with `b=1` and `mu=2`. It vanishes at the five reported equilibria:
 the origin, `(3/8,3/8,3/8)`, and the three permutations of `(1/2,1/2,0)`.
+The printed cost uses the full total `S` where this interpretation uses `r_i`;
+its literal derivative does not vanish at the reported nonzero equilibria, so
+the discrepancy is documented and tested rather than silently ignored.
 The source uses uniform initial samples on `[0,1]^3` and noise amplitude `0.1`
 for every coordinate.
 

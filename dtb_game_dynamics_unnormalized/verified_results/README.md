@@ -51,3 +51,10 @@ the particle and tangent-basis sizes together using `--paper-scale`.
 three-player game, seed, time grid, network, and `m=128` tangent basis. A more
 conservative `svd_rtol=1e-3` is used for every run so the 5,000-particle solve
 stays finite. See its README and `sample_count_comparison.png` for the results.
+
+## Depth-4, 2,000-particle computation
+
+`three_player_n2000_depth4/` contains the requested `N=2000`, four-hidden-layer
+Neural--DTB computation. Its figures distinguish the unstable origin with a
+gold `X` from the four stable equilibria shown as red circles. See the folder's
+README for the exact configuration and numerical summary.

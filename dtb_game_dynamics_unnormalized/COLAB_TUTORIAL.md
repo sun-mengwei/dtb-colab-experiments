@@ -156,8 +156,8 @@ display(Image("outputs/colab_three_player/sde_baseline_snapshots.png"))
 display(Image("outputs/colab_three_player/diagnostics.png"))
 ```
 
-The red markers show the origin, `(3/8,3/8,3/8)`, and the permutations of
-`(1/2,1/2,0)`. The validated 3D preset uses `h=0.005`, 200 steps, `m=128`, and
+The gold `X` marks the unstable origin. Red circles mark `(3/8,3/8,3/8)` and
+the permutations of `(1/2,1/2,0)`. The validated 3D preset uses `h=0.005`, 200 steps, `m=128`, and
 `svd_rtol=1e-4` because the coarser 2D time step is unstable for this case.
 
 ## 9. Compare 512, 1,024, and 5,000 samples
@@ -189,7 +189,27 @@ display(Image("outputs/sample_study_stable/sample_count_comparison.png"))
 Exact metrics are saved in
 `outputs/sample_study_stable/sample_count_metrics.csv`.
 
-## 10. Optional denser tangent basis
+## 10. Run 2,000 particles with a depth-4 network
+
+```python
+!python replicate_three_player_game.py \
+  --particles 2000 \
+  --depth 4 \
+  --svd-rtol 1e-3 \
+  --skip-sde-baseline \
+  --device auto \
+  --output-dir outputs/three_player_n2000_depth4
+```
+
+```python
+display(Image("outputs/three_player_n2000_depth4/dtb_snapshots.png"))
+display(Image("outputs/three_player_n2000_depth4/diagnostics.png"))
+```
+
+The unstable origin is a gold `X`; the four stable equilibria are red circles.
+Depth 4 means four hidden `Linear+tanh` blocks plus the output layer.
+
+## 11. Optional denser tangent basis
 
 Only start this after the fast run succeeds:
 
@@ -211,7 +231,7 @@ paper-scale preset uses `m=256`, `h=0.005`, and 200 steps. These are documented
 replication choices because the exact source values are not visible in the
 supplied screenshot.
 
-## 11. Save results to Drive
+## 12. Save results to Drive
 
 Colab runtime files disappear when the session ends:
 
@@ -223,11 +243,12 @@ drive.mount("/content/drive")
 ```python
 !zip -qr dtb_game_replication.zip \
   outputs/colab_replication \
-  outputs/colab_three_player
+  outputs/colab_three_player \
+  outputs/three_player_n2000_depth4
 !cp dtb_game_replication.zip "/content/drive/MyDrive/"
 ```
 
-## 12. Pull later changes
+## 13. Pull later changes
 
 ```python
 %cd /content/dtb-colab-experiments

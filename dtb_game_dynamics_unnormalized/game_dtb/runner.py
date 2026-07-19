@@ -240,11 +240,13 @@ def run_experiment(args: Any) -> Path:
     (output_dir / "config.json").write_text(json.dumps(metadata, indent=2) + "\n")
 
     equilibria = _equilibria(args)
+    equilibrium_is_stable = _equilibrium_stability(args)
     _plot_snapshots(
         output_dir / "dtb_snapshots.png",
         ordered_snapshots,
         ordered_snapshot_times,
         equilibria,
+        equilibrium_is_stable,
         args.plot_low,
         args.plot_high,
         title=f"Neural--DTB: {args.initial_distribution} initial samples",
@@ -255,6 +257,7 @@ def run_experiment(args: Any) -> Path:
             baseline_snapshots,
             ordered_snapshot_times,
             equilibria,
+            equilibrium_is_stable,
             args.plot_low,
             args.plot_high,
             title="Euler--Maruyama best-response baseline",
@@ -318,6 +321,18 @@ def _equilibria(args: Any) -> np.ndarray:
     return np.empty((0, 2))
 
 
+def _equilibrium_stability(args: Any) -> np.ndarray:
+    """Return a Boolean stability label aligned with ``_equilibria``."""
+
+    if args.game == "cournot" and args.cournot_b == 1.0 and args.cournot_mu == 2.0:
+        return np.asarray([False, True], dtype=bool)
+    if args.game == "cournot3" and args.cournot_b == 1.0 and args.cournot_mu == 2.0:
+        return np.asarray([False, True, True, True, True], dtype=bool)
+    if args.game == "linear":
+        return np.asarray([True], dtype=bool)
+    return np.empty((0,), dtype=bool)
+
+
 def simulate_euler_maruyama(
     initial_particles: np.ndarray,
     drift: Callable[[torch.Tensor], torch.Tensor],
@@ -355,6 +370,7 @@ def _plot_snapshots(
     snapshots: np.ndarray,
     times: np.ndarray,
     equilibria: np.ndarray,
+    equilibrium_is_stable: np.ndarray,
     plot_low: float,
     plot_high: float,
     *,
@@ -368,6 +384,8 @@ def _plot_snapshots(
     dim = snapshots.shape[-1]
     if dim not in (2, 3):
         raise ValueError("snapshot plotting currently supports only d=2 or d=3")
+    if equilibrium_is_stable.shape != (len(equilibria),):
+        raise ValueError("equilibrium stability labels must align with equilibria")
     subplot_kw = {"projection": "3d"} if dim == 3 else {}
     figure, axes = plt.subplots(
         rows,
@@ -395,15 +413,27 @@ def _plot_snapshots(
                 rasterized=True,
             )
             if equilibria.size:
-                axis.scatter(
-                    equilibria[:, 0],
-                    equilibria[:, 1],
-                    equilibria[:, 2],
-                    s=24,
-                    color="red",
-                    marker=".",
-                    depthshade=False,
-                )
+                stable = equilibria[equilibrium_is_stable]
+                unstable = equilibria[~equilibrium_is_stable]
+                if stable.size:
+                    axis.scatter(
+                        stable[:, 0], stable[:, 1], stable[:, 2],
+                        s=34, color="#d62728", marker="o", depthshade=False,
+                        label=(
+                            f"stable equilibria ({len(stable)})"
+                            if index == 0 else "_nolegend_"
+                        ),
+                    )
+                if unstable.size:
+                    axis.scatter(
+                        unstable[:, 0], unstable[:, 1], unstable[:, 2],
+                        s=64, color="#ffbf00", edgecolors="#222222",
+                        linewidths=0.7, marker="X", depthshade=False,
+                        label=(
+                            "unstable equilibrium (origin)"
+                            if index == 0 else "_nolegend_"
+                        ),
+                    )
             axis.set_zlim(plot_low, plot_high)
             axis.set_zlabel(r"$x_3$", labelpad=1)
             axis.set_box_aspect((1, 1, 1))
@@ -423,10 +453,27 @@ def _plot_snapshots(
                 color="#1786c7", edgecolors="none", rasterized=True,
             )
             if equilibria.size:
-                axis.scatter(
-                    equilibria[:, 0], equilibria[:, 1], s=28,
-                    color="red", marker=".", zorder=5,
-                )
+                stable = equilibria[equilibrium_is_stable]
+                unstable = equilibria[~equilibrium_is_stable]
+                if stable.size:
+                    axis.scatter(
+                        stable[:, 0], stable[:, 1], s=38,
+                        color="#d62728", marker="o", zorder=5,
+                        label=(
+                            f"stable equilibria ({len(stable)})"
+                            if index == 0 else "_nolegend_"
+                        ),
+                    )
+                if unstable.size:
+                    axis.scatter(
+                        unstable[:, 0], unstable[:, 1], s=68,
+                        color="#ffbf00", edgecolors="#222222", linewidths=0.7,
+                        marker="X", zorder=6,
+                        label=(
+                            "unstable equilibrium (origin)"
+                            if index == 0 else "_nolegend_"
+                        ),
+                    )
             axis.set_aspect("equal", adjustable="box")
             axis.text(
                 0.5,
@@ -445,8 +492,18 @@ def _plot_snapshots(
     for axis in axes_array[count:]:
         axis.set_visible(False)
     figure.suptitle(title, fontsize=12)
+    handles, legend_labels = axes_array[0].get_legend_handles_labels()
+    if handles:
+        figure.legend(
+            handles,
+            legend_labels,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.935),
+            ncol=min(2, len(handles)),
+            frameon=False,
+        )
     figure.subplots_adjust(
-        left=0.07, right=0.98, bottom=0.10, top=0.90, wspace=0.34, hspace=0.68
+        left=0.07, right=0.98, bottom=0.10, top=0.84, wspace=0.34, hspace=0.68
     )
     figure.savefig(path, dpi=180)
     plt.close(figure)

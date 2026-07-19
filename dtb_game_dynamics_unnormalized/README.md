@@ -46,16 +46,25 @@ instead defines the caption's `0.1` as an entry of `D` itself.
 ### Three-player game
 
 Let `r_i` be the sum of the other two players' strategies. The implemented
-three-player drift is
+three-player payoff and drift are
 
 ```text
+Pi_i(x) = -d - b x_i^2 + 2 b mu x_i r_i (1-r_i)
 b_i(x) = -2 b x_i + 2 b mu r_i - 2 b mu r_i^2,
 b=1, mu=2.
 ```
 
+This uses the equilibrium-consistent interpretation that the two aggregate
+terms in the printed cost contain the opponents' total `r_i`, not the total
+`S=sum_j x_j`. Reading the printed `S` literally produces a different gradient
+that does not vanish at the four reported nonzero equilibria; the complete
+algebra and supplied close-ups are recorded in [`references/`](references/README.md).
+
 Its five listed equilibria are the origin, `(3/8,3/8,3/8)`, and the three
 permutations of `(1/2,1/2,0)`. The 3D target uses uniform samples on `[0,1]^3`,
 noise amplitudes `sigma_1=sigma_2=sigma_3=0.1`, and the same six times.
+Snapshot legends show the unstable origin as a gold `X` and the four stable
+equilibria as red circles.
 
 ## Fastest replication
 
@@ -84,6 +93,22 @@ Run the three-player case:
 ```bash
 python replicate_three_player_game.py --device auto
 ```
+
+Run the confirmed `N=2000`, depth-4 configuration with labeled stability:
+
+```bash
+python replicate_three_player_game.py \
+  --particles 2000 \
+  --depth 4 \
+  --svd-rtol 1e-3 \
+  --skip-sde-baseline \
+  --device auto \
+  --output-dir outputs/three_player_n2000_depth4
+```
+
+Here `depth=4` means four hidden `Linear+tanh` blocks plus the final linear
+output layer. The saved result is available under
+[`verified_results/three_player_n2000_depth4/`](verified_results/three_player_n2000_depth4/README.md).
 
 A completed 256-particle result is included under
 [`verified_results/three_player_n256/`](verified_results/README.md) so the 3D
@@ -119,7 +144,8 @@ outputs/thesis_replication/
     config.json
 ```
 
-The red points in the snapshot panels mark `(0,0)` and `(0.5,0.5)`.
+The gold `X` marks the unstable origin and the red circle marks the stable
+equilibrium `(0.5,0.5)`.
 
 ## Denser experiment
 

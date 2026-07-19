@@ -13,6 +13,9 @@ beside the implementation so they can be read together.
   cost, and known-equilibria pages.
 - `target_figures_4_5_4_6.png`: the supplied best-response and pushforward-map
   point clouds for the three-player game.
+- `printed_payoff_equations.png`: the later close-up of Equations 4.61--4.62.
+- `printed_payoff_derivative_check.png`: the supplied derivative check showing
+  the consequence of reading the printed total literally.
 
 ## Target experiment read from the figure
 
@@ -39,14 +42,32 @@ values from the source document.
 
 ## Three-player target
 
-For each player let `r_i=sum_{j != i} x_j`. The best-response drift consistent
-with the displayed payoff construction, the two-player implementation, and all
-five listed equilibria is
+The printed Equation 4.62 uses the total `S=x_1+x_2+x_3` in its two nonlinear
+cost terms. Read literally, it gives
+
+```text
+d Pi_i / d x_i = 2 b mu [S(1-S) + x_i(1-2S)],
+```
+
+which is not zero at the four reported nonzero equilibria. We therefore use the
+equilibrium-consistent interpretation confirmed for this replication: those
+two aggregate terms contain the opponents' total
+`r_i=sum_{j != i} x_j`. The resulting payoff and own-action gradient are
+
+```text
+Pi_i = -d - b x_i^2 + 2 b mu x_i r_i(1-r_i),
+d Pi_i / d x_i = -2 b x_i + 2 b mu r_i - 2 b mu r_i^2.
+```
+
+Thus the implemented drift is
 
 ```text
 b_i(x) = -2 b x_i + 2 b mu r_i - 2 b mu r_i^2,
 b=1, mu=2.
 ```
+
+This is also `2b` times `best_response_i-x_i`, with
+`best_response_i=mu*r_i*(1-r_i)`.
 
 The known equilibria are
 

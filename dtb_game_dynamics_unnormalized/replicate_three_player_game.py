@@ -17,6 +17,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--paper-scale", action="store_true")
     parser.add_argument("--particles", type=int, default=None)
     parser.add_argument(
+        "--depth",
+        type=int,
+        default=None,
+        help="override the number of hidden Linear+tanh blocks",
+    )
+    parser.add_argument(
         "--svd-rtol",
         type=float,
         default=None,
@@ -40,6 +46,11 @@ def experiment_args(cli: argparse.Namespace) -> SimpleNamespace:
         basis_size, width, depth = 128, 32, 2
         steps, step_size = 200, 0.005
         jacobian_chunk, derivative_chunk = 128, 64
+
+    if cli.depth is not None:
+        if cli.depth < 1:
+            raise ValueError("depth must be positive")
+        depth = cli.depth
 
     return SimpleNamespace(
         game="cournot3",
@@ -82,6 +93,7 @@ def experiment_args(cli: argparse.Namespace) -> SimpleNamespace:
 def main() -> None:
     cli = parse_args()
     print("=== Three-player non-potential Cournot game ===")
+    print("payoff convention: opponent total r_i=sum_{j != i} x_j")
     print("known equilibria: origin, (3/8)^3, permutations of (1/2,1/2,0)")
     run_experiment(experiment_args(cli))
 

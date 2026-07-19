@@ -24,7 +24,7 @@ STABLE_EQUILIBRIA = np.asarray(
         [0.0, 0.5, 0.5],
     ]
 )
-ALL_EQUILIBRIA = np.vstack([np.zeros((1, 3)), STABLE_EQUILIBRIA])
+UNSTABLE_EQUILIBRIUM = np.zeros((1, 3))
 
 
 def parse_args() -> argparse.Namespace:
@@ -108,12 +108,28 @@ def _plot_comparison(
             linewidths=0,
         )
         axis.scatter(
-            ALL_EQUILIBRIA[:, 0],
-            ALL_EQUILIBRIA[:, 1],
-            ALL_EQUILIBRIA[:, 2],
+            STABLE_EQUILIBRIA[:, 0],
+            STABLE_EQUILIBRIA[:, 1],
+            STABLE_EQUILIBRIA[:, 2],
             s=34,
             color="#d62728",
+            marker="o",
             depthshade=False,
+            label="stable equilibria (4)" if column == 0 else "_nolegend_",
+        )
+        axis.scatter(
+            UNSTABLE_EQUILIBRIUM[:, 0],
+            UNSTABLE_EQUILIBRIUM[:, 1],
+            UNSTABLE_EQUILIBRIUM[:, 2],
+            s=64,
+            color="#ffbf00",
+            edgecolors="#222222",
+            linewidths=0.7,
+            marker="X",
+            depthshade=False,
+            label=(
+                "unstable equilibrium (origin)" if column == 0 else "_nolegend_"
+            ),
         )
         axis.set(xlim=(-0.4, 1.0), ylim=(-0.4, 1.0), zlim=(-0.4, 1.0))
         axis.set_xlabel(r"$x_1$")
@@ -170,6 +186,8 @@ def _plot_comparison(
     figure.suptitle(
         "Three-player Neural--DTB sample-count study (fixed m=128)", fontsize=16
     )
+    handles, labels = figure.axes[0].get_legend_handles_labels()
+    figure.legend(handles, labels, loc="upper center", ncol=2, frameon=False)
     figure.savefig(output_path, dpi=180)
     plt.close(figure)
 

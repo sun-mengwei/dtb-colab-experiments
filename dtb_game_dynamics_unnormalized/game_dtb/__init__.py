@@ -3,6 +3,7 @@
 from .algorithm import DTBConfig, NeuralDTBGameDynamics
 from .games import (
     cournot_duopoly_drift,
+    cournot_multiplayer_payoff,
     cournot_multiplayer_drift,
     cournot_three_player_drift,
     linear_quadratic_drift,
@@ -16,6 +17,7 @@ __all__ = [
     "ParticleState",
     "TangentMLP",
     "cournot_duopoly_drift",
+    "cournot_multiplayer_payoff",
     "cournot_multiplayer_drift",
     "cournot_three_player_drift",
     "gaussian_particle_state",
