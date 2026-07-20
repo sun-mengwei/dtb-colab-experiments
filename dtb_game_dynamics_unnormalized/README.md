@@ -157,6 +157,21 @@ same `m=128` scalar tangent directions and start from identical particles. The
 verified single-seed result is under
 [`verified_results/three_player_mlp_mmnn_n500/`](verified_results/three_player_mlp_mmnn_n500/README.md).
 
+Run the simplest MLP/Neural-ODE tangent-basis comparison:
+
+```bash
+python compare_two_player_mlp_node.py \
+  --particles 1000 --width 16 --depth 2 \
+  --basis-size 64 --node-inner-steps 4 --device auto
+```
+
+This uses only the two-player game and uniform samples on `[0,1]^2`. Both
+basis generators have 354 parameters and remain fixed during DTB evolution.
+The NODE integrates its internal vector field with four fixed RK4 steps; the
+parameter sensitivities of its terminal flow form the tangent dictionary. The
+completed comparison is under
+[`verified_results/two_player_mlp_node_n1000/`](verified_results/two_player_mlp_node_n1000/README.md).
+
 A completed 256-particle result is included under
 [`verified_results/three_player_n256/`](verified_results/README.md) so the 3D
 panels and raw arrays can be inspected without rerunning Colab.
@@ -264,6 +279,44 @@ No `1/N` or `1/sqrt(N)` factor is applied. Singular values are retained when
 log density, and score using exact automatic differentiation of `grad u`,
 `div u`, and `grad(div u)`.
 
+### Periodic tangent-network refit
+
+The game solver now includes the block reset used by the original Deep
+Tangent Bundle method. Within a block it keeps the linearization point and
+selected tangent coordinates fixed and accumulates `sum(alpha_k)`. At a block
+boundary it constructs, on the current particle cloud,
+
+```text
+teacher(x) = f_theta_base(x) + h J_theta_base,S(x) sum(alpha_k),
+```
+
+fits the trainable network parameters to that teacher with Adam, and starts a
+new tangent block around the fitted parameters. The optimizer changes only the
+tangent network; it does not overwrite particles, log density, or score.
+Frozen MMNN `W,b` parameters remain frozen.
+
+Enable a refit every 20 physical steps with:
+
+```bash
+python run_game_dynamics.py \
+  --refit-interval 20 \
+  --refit-optimizer-steps 100 \
+  --refit-learning-rate 1e-3 \
+  --refit-batch-size 512 \
+  --output-dir outputs/periodic_refit
+```
+
+`--refit-interval 0` disables periodic refitting. Optionally add
+`--refit-residual-threshold 0.4` to trigger an earlier reset when the relative
+projection residual exceeds `0.4`. Each run saves `refit_diagnostics.png` and
+the event mask, before/after fit RMSE, event reason, block age, target norm,
+and absolute projection error in `history.npz`.
+
+This is the Eulerian game-dynamics analogue of the original method's
+pushforward-map refit: the fit data are current spatial particles rather than
+fixed PDE reference coordinates. The distinction is recorded in every
+`config.json`.
+
 ## Algorithm-to-code map
 
 | Algorithm block | Code |
@@ -295,6 +348,7 @@ replicate_three_player_game.py one-command Figures 4.5/4.6 workflow
 replicate_five_player_game.py  one-command Section 4.7.4 workflow
 compare_five_player_depths.py  matched depth-2/depth-4 comparison
 compare_three_player_architectures.py  500-sample MLP/MMNN pilot
+compare_two_player_mlp_node.py         1000-sample MLP/NODE pilot
 COLAB_TUTORIAL.md               GitHub-to-Colab instructions
 notebooks/                      executable Colab notebook
 SUMMARY.md                      technical assumptions and validation

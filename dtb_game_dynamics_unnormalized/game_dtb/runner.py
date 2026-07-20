@@ -19,7 +19,7 @@ from .games import (
     cournot_three_player_drift,
     linear_quadratic_drift,
 )
-from .models import TangentMLP, TangentMMNN
+from .models import TangentMLP, TangentMMNN, TangentNODE
 from .state import gaussian_particle_state, uniform_box_particle_state
 
 
@@ -121,8 +121,9 @@ def run_experiment(args: Any) -> Path:
     initial_particles = state.particles.detach().cpu().numpy().copy()
     drift = _make_drift(args)
 
-    # f_theta is not fitted to the solution; its selected parameter tangents
-    # form the Eulerian dictionary used in Blocks 2--8 of the algorithm.
+    # The selected parameter tangents of f_theta form the Eulerian dictionary.
+    # If refitting is enabled, accumulated tangent updates are periodically
+    # compressed into f_theta on the current particles.
     architecture = getattr(args, "architecture", "mlp")
     if architecture == "mlp":
         model = TangentMLP(
@@ -141,8 +142,18 @@ def run_experiment(args: Any) -> Path:
             activation=args.activation,
             dtype=dtype,
         ).to(device)
+    elif architecture == "node":
+        model = TangentNODE(
+            dim=args.dim,
+            width=args.width,
+            depth=args.depth,
+            activation=args.activation,
+            inner_steps=getattr(args, "node_inner_steps", 4),
+            integration_time=getattr(args, "node_integration_time", 1.0),
+            dtype=dtype,
+        ).to(device)
     else:
-        raise ValueError("architecture must be 'mlp' or 'mmnn'")
+        raise ValueError("architecture must be 'mlp', 'mmnn', or 'node'")
 
     initial_activation_diagnostics = model.tanh_diagnostics(state.particles)
 
@@ -159,6 +170,13 @@ def run_experiment(args: Any) -> Path:
         jacobian_chunk_size=args.jacobian_chunk,
         derivative_chunk_size=args.derivative_chunk,
         seed=args.seed,
+        refit_interval=getattr(args, "refit_interval", 0),
+        refit_optimizer_steps=getattr(args, "refit_optimizer_steps", 100),
+        refit_learning_rate=getattr(args, "refit_learning_rate", 1e-3),
+        refit_batch_size=getattr(args, "refit_batch_size", 256),
+        refit_residual_threshold=getattr(
+            args, "refit_residual_threshold", None
+        ),
     )
     method = NeuralDTBGameDynamics(model, drift, diffusion, config)
 
@@ -170,6 +188,13 @@ def run_experiment(args: Any) -> Path:
     ranks: list[int] = []
     alpha_norms: list[float] = []
     mean_divergences: list[float] = []
+    target_velocity_norms: list[float] = []
+    projected_velocity_norms: list[float] = []
+    refit_performed: list[bool] = []
+    refit_rmse_before: list[float] = []
+    refit_rmse_after: list[float] = []
+    refit_reasons: list[str] = []
+    steps_in_tangent_block: list[int] = []
     snapshot_particles: dict[int, np.ndarray] = {}
     if 0 in schedule:
         snapshot_particles[0] = initial_particles.copy()
@@ -186,6 +211,13 @@ def run_experiment(args: Any) -> Path:
         ranks.append(result.diagnostics.retained_rank)
         alpha_norms.append(result.alpha_norm)
         mean_divergences.append(result.mean_divergence)
+        target_velocity_norms.append(result.target_velocity_norm)
+        projected_velocity_norms.append(result.projected_velocity_norm)
+        refit_performed.append(result.refit_performed)
+        refit_rmse_before.append(result.refit_rmse_before)
+        refit_rmse_after.append(result.refit_rmse_after)
+        refit_reasons.append(result.refit_reason)
+        steps_in_tangent_block.append(result.steps_in_tangent_block)
         if completed in schedule:
             snapshot_particles[completed] = state.particles.detach().cpu().numpy().copy()
         if args.print_every > 0 and (
@@ -196,6 +228,12 @@ def run_experiment(args: Any) -> Path:
                 f"step {completed:4d}/{args.steps} t={times[-1]:.4f} "
                 f"mean={mean_text} residual={residuals[-1]:.3e} "
                 f"rank={ranks[-1]} |alpha|={alpha_norms[-1]:.3e}"
+            )
+        if result.refit_performed:
+            print(
+                f"  refit #{method.refit_count} ({result.refit_reason}) "
+                f"RMSE {result.refit_rmse_before:.3e} -> "
+                f"{result.refit_rmse_after:.3e} on current particles"
             )
 
     missing = sorted(set(schedule) - set(snapshot_particles))
@@ -235,6 +273,16 @@ def run_experiment(args: Any) -> Path:
         "retained_ranks": np.asarray(ranks),
         "alpha_norms": np.asarray(alpha_norms),
         "mean_divergences": np.asarray(mean_divergences),
+        "target_velocity_norms": np.asarray(target_velocity_norms),
+        "projected_velocity_norms": np.asarray(projected_velocity_norms),
+        "absolute_projection_errors": (
+            np.asarray(target_velocity_norms) * np.asarray(residuals)
+        ),
+        "refit_performed": np.asarray(refit_performed, dtype=bool),
+        "refit_rmse_before": np.asarray(refit_rmse_before),
+        "refit_rmse_after": np.asarray(refit_rmse_after),
+        "refit_reasons": np.asarray(refit_reasons),
+        "steps_in_tangent_block": np.asarray(steps_in_tangent_block),
         "snapshot_times": ordered_snapshot_times,
         "snapshot_particles": ordered_snapshots,
     }
@@ -248,6 +296,14 @@ def run_experiment(args: Any) -> Path:
             "resolved_architecture": architecture,
             "mmnn_rank": (
                 getattr(args, "rank", None) if architecture == "mmnn" else None
+            ),
+            "node_inner_steps": (
+                getattr(args, "node_inner_steps", 4)
+                if architecture == "node" else None
+            ),
+            "node_integration_time": (
+                getattr(args, "node_integration_time", 1.0)
+                if architecture == "node" else None
             ),
             "resolved_device": str(device),
             "torch_version": torch.__version__,
@@ -265,6 +321,12 @@ def run_experiment(args: Any) -> Path:
             "actual_basis_size_m": min(config.basis_size, method.parameter_count),
             "diffusion_matrix_diagonal": diffusion_entry,
             "dtb_config": asdict(config),
+            "refit_count": method.refit_count,
+            "refit_interpretation": (
+                "Eulerian block reset on current particles: fit f_theta to "
+                "f_base + h J_base sum(alpha); particle/log-density/score "
+                "state is not changed by optimizer fitting."
+            ),
             "tanh_diagnostics_initial": initial_activation_diagnostics,
             "tanh_diagnostics_final": model.tanh_diagnostics(state.particles),
         }
@@ -301,7 +363,19 @@ def run_experiment(args: Any) -> Path:
         np.asarray(residuals),
         np.asarray(alpha_norms),
         args.game,
+        refit_steps=np.flatnonzero(np.asarray(refit_performed)) + 1,
     )
+    if method.refitting_enabled:
+        _plot_refit_diagnostics(
+            output_dir / "refit_diagnostics.png",
+            np.asarray(times[1:]),
+            np.asarray(residuals),
+            np.asarray(ranks),
+            np.asarray(target_velocity_norms),
+            np.asarray(refit_performed),
+            np.asarray(refit_rmse_before),
+            np.asarray(refit_rmse_after),
+        )
     if args.dim == 5:
         _plot_pairwise_final(
             output_dir / "pairwise_final.png",
@@ -314,6 +388,8 @@ def run_experiment(args: Any) -> Path:
     if baseline_snapshots is not None:
         print(f"saved {output_dir / 'sde_baseline_snapshots.png'}")
     print(f"saved {output_dir / 'diagnostics.png'}")
+    if method.refitting_enabled:
+        print(f"saved {output_dir / 'refit_diagnostics.png'}")
     if args.dim == 5:
         print(f"saved {output_dir / 'pairwise_final.png'}")
     return output_dir
@@ -692,6 +768,8 @@ def _plot_summary(
     residuals: np.ndarray,
     alpha_norms: np.ndarray,
     game: str,
+    *,
+    refit_steps: np.ndarray | None = None,
 ) -> None:
     """Plot mean strategies plus projection and coefficient diagnostics."""
 
@@ -706,6 +784,62 @@ def _plot_summary(
     axes[2].set_title(r"$\|\alpha_k\|_2$")
     for axis in axes:
         axis.set_xlabel("time")
+        axis.grid(alpha=0.25)
+    if refit_steps is not None:
+        for step in refit_steps:
+            refit_time = times[int(step)]
+            for axis in axes:
+                axis.axvline(refit_time, color="#9467bd", alpha=0.20, linewidth=1.0)
+    figure.tight_layout()
+    figure.savefig(path, dpi=160)
+    plt.close(figure)
+
+
+def _plot_refit_diagnostics(
+    path: Path,
+    step_times: np.ndarray,
+    residuals: np.ndarray,
+    ranks: np.ndarray,
+    target_norms: np.ndarray,
+    refit_mask: np.ndarray,
+    rmse_before: np.ndarray,
+    rmse_after: np.ndarray,
+) -> None:
+    """Plot approximation quality and each network block reset."""
+
+    figure, axes = plt.subplots(2, 2, figsize=(10.5, 7.2))
+    event_times = step_times[refit_mask]
+    axes[0, 0].plot(step_times, residuals, color="#1f77b4")
+    axes[0, 0].set_title("Relative tangent projection residual")
+    axes[0, 1].plot(step_times, ranks, color="#2ca02c")
+    axes[0, 1].set_title("Truncated-SVD retained rank")
+    axes[1, 0].plot(
+        step_times, target_norms * residuals, color="#d62728"
+    )
+    axes[1, 0].set_title("Absolute projection error")
+    if bool(refit_mask.any()):
+        event_index = np.arange(1, int(refit_mask.sum()) + 1)
+        axes[1, 1].plot(
+            event_index, rmse_before[refit_mask], "o-", label="before refit"
+        )
+        axes[1, 1].plot(
+            event_index, rmse_after[refit_mask], "o-", label="after refit"
+        )
+        axes[1, 1].legend()
+    else:
+        axes[1, 1].text(
+            0.5, 0.5, "No refit was triggered", ha="center", va="center",
+            transform=axes[1, 1].transAxes,
+        )
+    axes[1, 1].set_title("Network fit RMSE at block resets")
+    axes[1, 1].set_xlabel("refit event")
+    for axis in axes.reshape(-1)[:3]:
+        for event_time in event_times:
+            axis.axvline(
+                event_time, color="#9467bd", alpha=0.28, linewidth=1.0
+            )
+        axis.set_xlabel("physical time")
+    for axis in axes.reshape(-1):
         axis.grid(alpha=0.25)
     figure.tight_layout()
     figure.savefig(path, dpi=160)

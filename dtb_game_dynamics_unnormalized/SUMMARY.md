@@ -90,6 +90,10 @@ values `x_i^k=X_k(z_i)`.
   plus a matched 500-sample comparison against the ordinary MLP.
 - Reference folder containing the original TeX algorithm and supplied image.
 - GitHub-first Colab tutorial and notebook.
+- Optional periodic or residual-triggered tangent-network refitting on the
+  current particles, with fixed tangent coordinates inside each block.
+- Refit-event, before/after RMSE, absolute projection-error, target-norm, and
+  tangent-block-age diagnostics.
 
 ## Reuse and isolation
 
@@ -100,7 +104,7 @@ unchanged; all additions live under `dtb_game_dynamics_unnormalized/`.
 
 ## Validation
 
-Twenty tests cover:
+Twenty-four tests cover:
 
 - unnormalized stacking;
 - tangent-span least-squares recovery;
@@ -117,6 +121,8 @@ Twenty tests cover:
 - invariance under zero drift and zero diffusion.
 - MMNN trainable/frozen parameter separation, output shape, and tanh
   saturation diagnostics.
+- periodic block refitting, block reset timing, non-increasing accepted refit
+  error, and preservation of frozen MMNN feature parameters.
 
 End-to-end 2D, 3D, and 5D runs produced finite six-time DTB panels; the 2D/3D
 presets and the five-player depth-2 run also produced direct SDE panels.
@@ -140,6 +146,17 @@ a smaller median final distance to the stable equilibria (`0.101` versus
 MMNN had a slightly lower residual at the final step (`0.609` versus `0.639`).
 Neither initialization contained units with `tanh'(z)<0.05`, so this comparison
 did not exhibit tanh saturation. Multiple seeds and MMNN ranks are still needed.
+
+In the simple two-player `N=1000` MLP/NODE pilot, both tangent generators used
+354 parameters, width 16, depth 2, `m=64`, and identical uniform initial
+particles. The NODE used four fixed RK4 steps over its internal depth interval.
+The final clouds were nearly indistinguishable: both placed `93.7%` of samples
+within radius `0.15` of `(0.5,0.5)`, with median distances `0.05262` (MLP) and
+`0.05251` (NODE). Mean projection residuals were `0.01195` and `0.01256`.
+The straightforward NODE implementation took `48.7 s` versus `5.4 s` for the
+MLP because every tangent and score derivative differentiates through all RK4
+stages. This one-seed result shows that the NODE basis path works, but provides
+no accuracy advantage in this simple case.
 
 ## Reproducibility caveat
 

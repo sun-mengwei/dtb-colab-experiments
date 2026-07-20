@@ -20,6 +20,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--step-size", type=float, default=0.02, help="Euler step h")
     parser.add_argument("--basis-size", type=int, default=64, help="selected basis size m")
     parser.add_argument("--svd-rtol", type=float, default=1e-5)
+    parser.add_argument(
+        "--refit-interval", type=int, default=0,
+        help="refit every L physical steps; 0 disables periodic refitting",
+    )
+    parser.add_argument(
+        "--refit-optimizer-steps", type=int, default=100,
+        help="Adam iterations at each tangent-block reset",
+    )
+    parser.add_argument("--refit-learning-rate", type=float, default=1e-3)
+    parser.add_argument("--refit-batch-size", type=int, default=256)
+    parser.add_argument(
+        "--refit-residual-threshold", type=float, default=None,
+        help="also refit after a step above this relative residual",
+    )
 
     # In the thesis caption sigma_i=0.1 is an SDE noise amplitude.  The
     # algorithm uses D=sigma sigma^T, so the default diagonal is 0.01.
@@ -47,9 +61,23 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--width", type=int, default=16)
     parser.add_argument("--depth", type=int, default=2)
-    parser.add_argument("--architecture", choices=("mlp", "mmnn"), default="mlp")
+    parser.add_argument(
+        "--architecture", choices=("mlp", "mmnn", "node"), default="mlp"
+    )
     parser.add_argument(
         "--rank", type=int, default=8, help="MMNN intermediate component count"
+    )
+    parser.add_argument(
+        "--node-inner-steps",
+        type=int,
+        default=4,
+        help="fixed RK4 steps over the NODE's internal depth interval",
+    )
+    parser.add_argument(
+        "--node-integration-time",
+        type=float,
+        default=1.0,
+        help="length of the NODE's internal depth interval",
     )
     parser.add_argument("--activation", choices=("tanh", "gelu", "silu"), default="tanh")
     parser.add_argument("--jacobian-chunk", type=int, default=128)

@@ -11,10 +11,10 @@ In Colab, choose **File → Open notebook → GitHub** and enter:
 https://github.com/sun-mengwei/dtb-colab-experiments
 ```
 
-Choose branch `codex/game-dynamics-dtb`, then open:
+Choose branch `codex/game-dynamics-dtb`, then open the controlled notebook:
 
 ```text
-dtb_game_dynamics_unnormalized/notebooks/game_dynamics_dtb_colab.ipynb
+dtb_game_dynamics_unnormalized/notebooks/controlled_game_experiments_colab.ipynb
 ```
 
 Select **Runtime → Change runtime type → T4 GPU** when available.
@@ -88,7 +88,31 @@ if torch.cuda.is_available():
 !python -m pytest
 ```
 
-Expected: `20 passed`.
+Expected: `24 passed`.
+
+## 4A. Periodic-refit controls in the controlled notebook
+
+Each 2D, 3D, and 5D setup block exposes:
+
+```text
+REFIT_INTERVAL_*          physical steps per tangent block; 0 disables refit
+REFIT_STEPS_*             Adam iterations at each block reset
+REFIT_LR_*                Adam learning rate
+REFIT_BATCH_*             current-particle minibatch size
+REFIT_RESIDUAL_TRIGGER_*  -1 disables; otherwise an early-refit threshold
+```
+
+The 2D default refits every 10 steps; the longer 3D and 5D experiments refit
+every 20 steps. Run the setup block again after changing a value, then run its
+`RUN_*` block. The result block displays `refit_diagnostics.png`; purple
+vertical lines show accepted refit events. Before/after RMSE measures how well
+the refreshed network represents the accumulated tangent update on the
+current samples.
+
+Refitting does not replace or train the particle locations. It trains only the
+tangent-basis network and then recomputes subsequent tangent projections from
+the refreshed network. Set every `REFIT_INTERVAL_* = 0` and leave every
+residual trigger at `-1` to reproduce the fixed-network behavior.
 
 ## 5. Run both replications
 

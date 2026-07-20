@@ -81,6 +81,71 @@ class TangentMLP(nn.Module):
         return diagnostics
 
 
+class TangentNODE(nn.Module):
+    """A small Neural ODE whose parameter sensitivities form the DTB basis.
+
+    The internal ODE depth variable ``s`` is separate from the physical game
+    time.  ``forward`` integrates
+
+        dy/ds = g_theta(y),  y(0) = x,
+
+    over a fixed interval with differentiable RK4 steps and returns ``y(1)``.
+    DTB differentiates this terminal flow with respect to selected entries of
+    ``theta`` and fits the coefficients of those tangent directions at each
+    physical step. Optional block refitting may subsequently train ``theta``
+    to the accumulated tangent state.
+
+    A fixed-step solver keeps the nested parameter and spatial derivatives in
+    the score equation transparent and reproducible.  It is intentionally
+    small; an adaptive/adjoint NODE would add complexity before the basic
+    comparison is understood.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        width: int = 16,
+        depth: int = 2,
+        activation: str = "tanh",
+        inner_steps: int = 4,
+        integration_time: float = 1.0,
+        dtype: torch.dtype = torch.float64,
+    ) -> None:
+        super().__init__()
+        if inner_steps < 1:
+            raise ValueError("inner_steps must be positive")
+        if integration_time <= 0:
+            raise ValueError("integration_time must be positive")
+        self.vector_field = TangentMLP(
+            dim=dim,
+            width=width,
+            depth=depth,
+            activation=activation,
+            dtype=dtype,
+        )
+        self.inner_steps = inner_steps
+        self.integration_time = float(integration_time)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # BLOCK NODE-1 -- Integrate the internal continuous-depth flow.  All
+        # operations remain in PyTorch so jacrev can obtain D_theta Phi(x),
+        # grad_x u, and grad_x(div u) for the outer DTB algorithm.
+        values = x
+        step = self.integration_time / self.inner_steps
+        for _ in range(self.inner_steps):
+            k1 = self.vector_field(values)
+            k2 = self.vector_field(values + 0.5 * step * k1)
+            k3 = self.vector_field(values + 0.5 * step * k2)
+            k4 = self.vector_field(values + step * k3)
+            values = values + (step / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        return values
+
+    def tanh_diagnostics(self, x: torch.Tensor) -> list[dict[str, float | int]]:
+        """Report vector-field saturation at the NODE entrance state."""
+
+        return self.vector_field.tanh_diagnostics(x)
+
+
 class RandomFeatureBlock(nn.Module):
     """One MMNN block ``A activation(Wx+b)+c``.
 
