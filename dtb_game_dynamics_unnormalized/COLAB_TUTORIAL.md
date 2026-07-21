@@ -98,21 +98,22 @@ Each 2D, 3D, and 5D setup block exposes:
 REFIT_INTERVAL_*          physical steps per tangent block; 0 disables refit
 REFIT_STEPS_*             Adam iterations at each block reset
 REFIT_LR_*                Adam learning rate
-REFIT_BATCH_*             current-particle minibatch size
-REFIT_RESIDUAL_TRIGGER_*  -1 disables; otherwise an early-refit threshold
+REFIT_BATCH_*             minibatch size, sampled with replacement
+REFIT_SAMPLES_*           one-shot fresh reference-law training set
+REFIT_TEST_SAMPLES_*      separate fresh reference-law RMSE set
 ```
 
-The 2D default refits every 10 steps; the longer 3D and 5D experiments refit
-every 20 steps. Run the setup block again after changing a value, then run its
-`RUN_*` block. The result block displays `refit_diagnostics.png`; purple
-vertical lines show accepted refit events. Before/after RMSE measures how well
-the refreshed network represents the accumulated tangent update on the
-current samples.
+The controlled notebook uses the source game driver's defaults: `L=50`, 2,000
+Adam steps, learning rate `1e-3`, batch size 2,048, 10,000 training samples,
+and 4,000 fresh test samples. These reset fits are intentionally expensive.
+Run the setup block again after changing a value, then run its `RUN_*` block.
+The result block displays `refit_diagnostics.png`; purple vertical lines show
+reset events.
 
-Refitting does not replace or train the particle locations. It trains only the
-tangent-basis network and then recomputes subsequent tangent projections from
-the refreshed network. Set every `REFIT_INTERVAL_* = 0` and leave every
-residual trigger at `-1` to reproduce the fixed-network behavior.
+Resetting trains only the tangent-basis network. It follows the original rule
+without residual-triggered resets or rollback. The total Euler-step count must
+be divisible by `L`. Set every `REFIT_INTERVAL_* = 0` to reproduce the
+fixed-network behavior.
 
 ## 5. Run both replications
 

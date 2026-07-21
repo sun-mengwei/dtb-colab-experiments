@@ -84,6 +84,12 @@ def run_experiment(args: Any) -> Path:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     schedule = snapshot_schedule(args.snapshot_times, args.steps, args.step_size)
+    refit_interval = getattr(args, "refit_interval", 0)
+    if refit_interval > 0 and args.steps % refit_interval != 0:
+        raise ValueError(
+            "steps must be a multiple of refit_interval, matching the "
+            "complete-block rule in the original DTB implementation"
+        )
 
     # BLOCK 1 -- Initialize x_i^0, log rho_0(x_i^0), and q_i^0.
     state_generator = torch.Generator(
@@ -100,6 +106,18 @@ def run_experiment(args: Any) -> Path:
             dtype=dtype,
             generator=state_generator,
         )
+
+        def reference_sampler(
+            count: int, generator: torch.Generator
+        ) -> torch.Tensor:
+            return (
+                torch.rand(
+                    count, args.dim, device=device, dtype=dtype,
+                    generator=generator,
+                )
+                * (args.uniform_high - args.uniform_low)
+                + args.uniform_low
+            )
     elif args.initial_distribution == "gaussian":
         initial_std = (
             math.sqrt(args.initial_variance)
@@ -115,6 +133,18 @@ def run_experiment(args: Any) -> Path:
             dtype=dtype,
             generator=state_generator,
         )
+
+        def reference_sampler(
+            count: int, generator: torch.Generator
+        ) -> torch.Tensor:
+            return (
+                torch.randn(
+                    count, args.dim, device=device, dtype=dtype,
+                    generator=generator,
+                )
+                * initial_std
+                + args.initial_mean
+            )
     else:
         raise ValueError(f"unknown initial distribution: {args.initial_distribution}")
 
@@ -122,8 +152,8 @@ def run_experiment(args: Any) -> Path:
     drift = _make_drift(args)
 
     # The selected parameter tangents of f_theta form the Eulerian dictionary.
-    # If refitting is enabled, accumulated tangent updates are periodically
-    # compressed into f_theta on the current particles.
+    # If resetting is enabled, accumulated tangent updates are periodically
+    # compressed into f_theta on fresh samples from the reference law.
     architecture = getattr(args, "architecture", "mlp")
     if architecture == "mlp":
         model = TangentMLP(
@@ -170,15 +200,16 @@ def run_experiment(args: Any) -> Path:
         jacobian_chunk_size=args.jacobian_chunk,
         derivative_chunk_size=args.derivative_chunk,
         seed=args.seed,
-        refit_interval=getattr(args, "refit_interval", 0),
-        refit_optimizer_steps=getattr(args, "refit_optimizer_steps", 100),
+        refit_interval=refit_interval,
+        refit_optimizer_steps=getattr(args, "refit_optimizer_steps", 2_000),
         refit_learning_rate=getattr(args, "refit_learning_rate", 1e-3),
-        refit_batch_size=getattr(args, "refit_batch_size", 256),
-        refit_residual_threshold=getattr(
-            args, "refit_residual_threshold", None
-        ),
+        refit_batch_size=getattr(args, "refit_batch_size", 2_048),
+        refit_samples=getattr(args, "refit_samples", 10_000),
+        refit_test_samples=getattr(args, "refit_test_samples", 4_000),
     )
-    method = NeuralDTBGameDynamics(model, drift, diffusion, config)
+    method = NeuralDTBGameDynamics(
+        model, drift, diffusion, config, reference_sampler=reference_sampler
+    )
 
     times = [0.0]
     means = [state.particles.mean(dim=0).detach().cpu().numpy()]
@@ -233,7 +264,7 @@ def run_experiment(args: Any) -> Path:
             print(
                 f"  refit #{method.refit_count} ({result.refit_reason}) "
                 f"RMSE {result.refit_rmse_before:.3e} -> "
-                f"{result.refit_rmse_after:.3e} on current particles"
+                f"{result.refit_rmse_after:.3e} on fresh reference samples"
             )
 
     missing = sorted(set(schedule) - set(snapshot_particles))
@@ -322,10 +353,12 @@ def run_experiment(args: Any) -> Path:
             "diffusion_matrix_diagonal": diffusion_entry,
             "dtb_config": asdict(config),
             "refit_count": method.refit_count,
-            "refit_interpretation": (
-                "Eulerian block reset on current particles: fit f_theta to "
-                "f_base + h J_base sum(alpha); particle/log-density/score "
-                "state is not changed by optimizer fitting."
+            "refit_rule": (
+                "Source-matching DTB block reset: freeze theta_block and one "
+                "random selected sub-basis for exactly L steps; accumulate "
+                "s=sum(alpha); precompute f_theta_block+h*J_block*s on fresh "
+                "samples from the initial reference law; fit all trainable "
+                "parameters with Adam plus cosine LR; test on a fresh batch."
             ),
             "tanh_diagnostics_initial": initial_activation_diagnostics,
             "tanh_diagnostics_final": model.tanh_diagnostics(state.particles),
@@ -820,10 +853,10 @@ def _plot_refit_diagnostics(
     if bool(refit_mask.any()):
         event_index = np.arange(1, int(refit_mask.sum()) + 1)
         axes[1, 1].plot(
-            event_index, rmse_before[refit_mask], "o-", label="before refit"
+            event_index, rmse_before[refit_mask], "o-", label="pre-fit train"
         )
         axes[1, 1].plot(
-            event_index, rmse_after[refit_mask], "o-", label="after refit"
+            event_index, rmse_after[refit_mask], "o-", label="post-fit fresh test"
         )
         axes[1, 1].legend()
     else:
@@ -831,7 +864,7 @@ def _plot_refit_diagnostics(
             0.5, 0.5, "No refit was triggered", ha="center", va="center",
             transform=axes[1, 1].transAxes,
         )
-    axes[1, 1].set_title("Network fit RMSE at block resets")
+    axes[1, 1].set_title("Network RMSE at block resets")
     axes[1, 1].set_xlabel("refit event")
     for axis in axes.reshape(-1)[:3]:
         for event_time in event_times:

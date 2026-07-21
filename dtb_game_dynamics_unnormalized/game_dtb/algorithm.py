@@ -17,8 +17,9 @@ from .projection import (
     truncated_svd_solve,
 )
 from .refit import (
-    accumulated_tangent_teacher,
-    fit_model_to_current_particles,
+    AccumulatedTangentTarget,
+    ReferenceSampler,
+    fit_model_to_target,
 )
 from .state import ParticleState
 
@@ -39,12 +40,11 @@ class DTBConfig:
     # positive, one tangent coordinate subset is held for this many physical
     # steps and then compressed into a newly fitted network.
     refit_interval: int = 0
-    refit_optimizer_steps: int = 100
+    refit_optimizer_steps: int = 2_000
     refit_learning_rate: float = 1e-3
-    refit_batch_size: int = 256
-    # None disables error-triggered refits.  A refit occurs after a step whose
-    # relative tangent residual exceeds this value.
-    refit_residual_threshold: float | None = None
+    refit_batch_size: int = 2_048
+    refit_samples: int = 10_000
+    refit_test_samples: int = 4_000
 
     def validate(self) -> None:
         if self.step_size <= 0:
@@ -61,11 +61,8 @@ class DTBConfig:
             raise ValueError("refit_learning_rate must be positive")
         if self.refit_batch_size < 1:
             raise ValueError("refit_batch_size must be positive")
-        if (
-            self.refit_residual_threshold is not None
-            and not 0 <= self.refit_residual_threshold <= 1
-        ):
-            raise ValueError("refit_residual_threshold must lie in [0,1]")
+        if self.refit_samples < 1 or self.refit_test_samples < 1:
+            raise ValueError("refit sample counts must be positive")
 
 
 @dataclass(frozen=True)
@@ -89,9 +86,9 @@ class NeuralDTBGameDynamics:
     """Advance particles, log density, and score with Neural--DTB.
 
     By default the neural parameters remain fixed and each step draws a fresh
-    coordinate subset ``S_k``.  Optional periodic/error-triggered refitting
+    coordinate subset ``S_k``. Optional source-matching periodic resetting
     holds one subset within a block, accumulates its tangent update, fits the
-    network to that update on the current particles, and starts a new block.
+    network to that update on fresh reference samples, and starts a new block.
     """
 
     def __init__(
@@ -100,6 +97,7 @@ class NeuralDTBGameDynamics:
         drift: Drift,
         diffusion: torch.Tensor,
         config: DTBConfig,
+        reference_sampler: ReferenceSampler | None = None,
     ) -> None:
         config.validate()
         if diffusion.ndim != 2 or diffusion.shape[0] != diffusion.shape[1]:
@@ -115,6 +113,7 @@ class NeuralDTBGameDynamics:
         self.drift = drift
         self.diffusion = diffusion
         self.config = config
+        self.reference_sampler = reference_sampler
         self.theta_flat, self.structure = flat_params(model)
         self.theta_flat = self.theta_flat.to(diffusion.device, diffusion.dtype)
         self.parameter_count = self.theta_flat.numel()
@@ -131,10 +130,7 @@ class NeuralDTBGameDynamics:
 
     @property
     def refitting_enabled(self) -> bool:
-        return (
-            self.config.refit_interval > 0
-            or self.config.refit_residual_threshold is not None
-        )
+        return self.config.refit_interval > 0
 
     def _start_tangent_block(self, device: torch.device) -> None:
         """Freeze a linearization point and selected basis for one block."""
@@ -247,8 +243,8 @@ class NeuralDTBGameDynamics:
         next_state.validate()
 
         # BLOCK 10A — Accumulate the fixed-basis coefficients.  At a block
-        # boundary, fit f_theta to f_base + h J_base sum(alpha) using the
-        # current particles, then relinearize at the fitted parameters.
+        # boundary, precompute f_base + h J_base sum(alpha) on fresh samples
+        # from lambda, fit the live model, then start a fresh tangent block.
         refit_performed = False
         refit_reason = ""
         refit_rmse_before = float("nan")
@@ -261,39 +257,45 @@ class NeuralDTBGameDynamics:
             self._block_alpha_sum = self._block_alpha_sum + alpha.detach()
             self._steps_in_block += 1
             steps_in_tangent_block = self._steps_in_block
-            periodic = (
-                self.config.refit_interval > 0
-                and self._steps_in_block >= self.config.refit_interval
-            )
-            excessive_residual = (
-                self.config.refit_residual_threshold is not None
-                and diagnostics.relative_residual
-                > self.config.refit_residual_threshold
-            )
-            if periodic or excessive_residual:
-                reasons = []
-                if periodic:
-                    reasons.append("periodic")
-                if excessive_residual:
-                    reasons.append("residual")
-                refit_reason = "+".join(reasons)
-                targets = accumulated_tangent_teacher(
+            periodic = self._steps_in_block == self.config.refit_interval
+            if periodic:
+                refit_reason = "periodic"
+                target_fn = AccumulatedTangentTarget(
                     self.model,
                     self._block_theta,
                     self.structure,
                     self._block_selected,
                     self._block_alpha_sum,
-                    next_state.particles,
                     step_size=h,
                     jacobian_chunk_size=self.config.jacobian_chunk_size,
                 )
-                refit = fit_model_to_current_particles(
+                if self.reference_sampler is None:
+                    labels = state.labels
+
+                    def empirical_reference_sampler(
+                        count: int, generator: torch.Generator
+                    ) -> torch.Tensor:
+                        indices = torch.randint(
+                            0,
+                            labels.shape[0],
+                            (count,),
+                            device=labels.device,
+                            generator=generator,
+                        )
+                        return labels[indices]
+
+                    sampler = empirical_reference_sampler
+                else:
+                    sampler = self.reference_sampler
+                refit = fit_model_to_target(
                     self.model,
-                    next_state.particles,
-                    targets,
+                    target_fn,
+                    sampler,
+                    n_samples=self.config.refit_samples,
                     optimizer_steps=self.config.refit_optimizer_steps,
                     learning_rate=self.config.refit_learning_rate,
                     batch_size=self.config.refit_batch_size,
+                    test_samples=self.config.refit_test_samples,
                     generator=self.generator,
                 )
                 self.theta_flat, refreshed_structure = flat_params(self.model)

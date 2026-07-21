@@ -279,43 +279,41 @@ No `1/N` or `1/sqrt(N)` factor is applied. Singular values are retained when
 log density, and score using exact automatic differentiation of `grad u`,
 `div u`, and `grad(div u)`.
 
-### Periodic tangent-network refit
+### Source-matching periodic tangent-network reset
 
 The game solver now includes the block reset used by the original Deep
 Tangent Bundle method. Within a block it keeps the linearization point and
-selected tangent coordinates fixed and accumulates `sum(alpha_k)`. At a block
-boundary it constructs, on the current particle cloud,
+selected tangent coordinates fixed and accumulates `s=sum(alpha_k)`. After
+exactly `L` steps it constructs the callable target
 
 ```text
-teacher(x) = f_theta_base(x) + h J_theta_base,S(x) sum(alpha_k),
+target(z) = f_theta_block(z) + h J_theta_block,S(z) s.
 ```
 
-fits the trainable network parameters to that teacher with Adam, and starts a
-new tangent block around the fitted parameters. The optimizer changes only the
-tangent network; it does not overwrite particles, log density, or score.
-Frozen MMNN `W,b` parameters remain frozen.
+It draws a fresh one-shot training set from the initial reference law
+`z~lambda`, precomputes `target(z)`, fits every trainable parameter with Adam
+and cosine learning-rate decay, evaluates RMSE on another fresh reference
+sample, and starts a new block. Frozen MMNN `W,b` parameters remain frozen.
+This is the same sequence used by `DTB_rep/run_game_dtb.py`.
 
-Enable a refit every 20 physical steps with:
+Use the source game driver's reset defaults with:
 
 ```bash
 python run_game_dynamics.py \
-  --refit-interval 20 \
-  --refit-optimizer-steps 100 \
+  --refit-interval 50 \
+  --refit-optimizer-steps 2000 \
   --refit-learning-rate 1e-3 \
-  --refit-batch-size 512 \
+  --refit-batch-size 2048 \
+  --refit-samples 10000 \
+  --refit-test-samples 4000 \
   --output-dir outputs/periodic_refit
 ```
 
-`--refit-interval 0` disables periodic refitting. Optionally add
-`--refit-residual-threshold 0.4` to trigger an earlier reset when the relative
-projection residual exceeds `0.4`. Each run saves `refit_diagnostics.png` and
-the event mask, before/after fit RMSE, event reason, block age, target norm,
-and absolute projection error in `history.npz`.
-
-This is the Eulerian game-dynamics analogue of the original method's
-pushforward-map refit: the fit data are current spatial particles rather than
-fixed PDE reference coordinates. The distinction is recorded in every
-`config.json`.
+`--refit-interval 0` disables resetting. As in the source code, the total
+number of Euler steps must be divisible by `L`; there is no residual-triggered
+reset and no rollback of an imperfect optimizer fit. Each run saves
+`refit_diagnostics.png`, the event mask, pre-fit training RMSE, post-fit
+fresh-test RMSE, block age, target norm, and absolute projection error.
 
 ## Algorithm-to-code map
 
@@ -340,7 +338,7 @@ fixed PDE reference coordinates. The distinction is recorded in every
 references/                    supplied TeX algorithm, target images, notes
 verified_results/              checked 3D/5D results, raw arrays, configuration
 game_dtb/                      reusable Neural–DTB implementation
-tests/                         twenty mathematical/integration tests
+tests/                         twenty-four mathematical/integration tests
 examples/custom_game.py        instructional custom game
 run_game_dynamics.py           configurable single experiment
 replicate_thesis_figures.py    one-command Figures 4.2/4.3 workflow

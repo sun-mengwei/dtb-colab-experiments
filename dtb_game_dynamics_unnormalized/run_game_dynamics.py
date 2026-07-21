@@ -25,14 +25,18 @@ def parse_args() -> argparse.Namespace:
         help="refit every L physical steps; 0 disables periodic refitting",
     )
     parser.add_argument(
-        "--refit-optimizer-steps", type=int, default=100,
+        "--refit-optimizer-steps", type=int, default=2_000,
         help="Adam iterations at each tangent-block reset",
     )
     parser.add_argument("--refit-learning-rate", type=float, default=1e-3)
-    parser.add_argument("--refit-batch-size", type=int, default=256)
+    parser.add_argument("--refit-batch-size", type=int, default=2_048)
     parser.add_argument(
-        "--refit-residual-threshold", type=float, default=None,
-        help="also refit after a step above this relative residual",
+        "--refit-samples", type=int, default=10_000,
+        help="fresh reference-law samples used to precompute each reset target",
+    )
+    parser.add_argument(
+        "--refit-test-samples", type=int, default=4_000,
+        help="fresh reference-law samples used for reset RMSE",
     )
 
     # In the thesis caption sigma_i=0.1 is an SDE noise amplitude.  The

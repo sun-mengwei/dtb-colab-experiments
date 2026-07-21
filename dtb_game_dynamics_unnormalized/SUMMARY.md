@@ -90,8 +90,9 @@ values `x_i^k=X_k(z_i)`.
   plus a matched 500-sample comparison against the ordinary MLP.
 - Reference folder containing the original TeX algorithm and supplied image.
 - GitHub-first Colab tutorial and notebook.
-- Optional periodic or residual-triggered tangent-network refitting on the
-  current particles, with fixed tangent coordinates inside each block.
+- Source-matching periodic resetting: fixed block parameters and tangent
+  coordinates, accumulated coefficients, a precomputed target on fresh
+  reference-law samples, and Adam with cosine learning-rate decay.
 - Refit-event, before/after RMSE, absolute projection-error, target-norm, and
   tangent-block-age diagnostics.
 
@@ -121,8 +122,8 @@ Twenty-four tests cover:
 - invariance under zero drift and zero diffusion.
 - MMNN trainable/frozen parameter separation, output shape, and tanh
   saturation diagnostics.
-- periodic block refitting, block reset timing, non-increasing accepted refit
-  error, and preservation of frozen MMNN feature parameters.
+- periodic block resetting, fresh reference train/test sampling, exact reset
+  timing, and preservation of frozen MMNN feature parameters.
 
 End-to-end 2D, 3D, and 5D runs produced finite six-time DTB panels; the 2D/3D
 presets and the five-player depth-2 run also produced direct SDE panels.

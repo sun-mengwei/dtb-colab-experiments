@@ -1,3 +1,5 @@
+import math
+
 import torch
 
 from game_dtb.algorithm import DTBConfig, NeuralDTBGameDynamics
@@ -71,7 +73,7 @@ def test_three_dimensional_step_is_finite() -> None:
     assert bool(torch.isfinite(result.state.score).all())
 
 
-def test_periodic_refit_uses_current_particles_and_resets_block() -> None:
+def test_periodic_refit_uses_fresh_reference_samples_and_resets_block() -> None:
     torch.manual_seed(7)
     dtype = torch.float64
     state = gaussian_particle_state(
@@ -79,6 +81,16 @@ def test_periodic_refit_uses_current_particles_and_resets_block() -> None:
         generator=torch.Generator().manual_seed(8),
     )
     model = TangentMLP(2, width=5, depth=1, dtype=dtype)
+    sample_calls: list[int] = []
+
+    def reference_sampler(
+        count: int, generator: torch.Generator
+    ) -> torch.Tensor:
+        sample_calls.append(count)
+        return torch.randn(
+            count, 2, dtype=dtype, generator=generator
+        ) * 0.1 + 0.5
+
     method = NeuralDTBGameDynamics(
         model,
         drift=lambda x: 0.5 - x,
@@ -94,7 +106,10 @@ def test_periodic_refit_uses_current_particles_and_resets_block() -> None:
             refit_optimizer_steps=100,
             refit_learning_rate=1e-3,
             refit_batch_size=12,
+            refit_samples=20,
+            refit_test_samples=10,
         ),
+        reference_sampler=reference_sampler,
     )
     first = method.step(state, 0)
     second = method.step(first.state, 1)
@@ -104,7 +119,9 @@ def test_periodic_refit_uses_current_particles_and_resets_block() -> None:
     assert second.refit_performed
     assert second.refit_reason == "periodic"
     assert second.steps_in_tangent_block == 2
-    assert second.refit_rmse_after <= second.refit_rmse_before
+    assert sample_calls == [20, 10]
+    assert math.isfinite(second.refit_rmse_before)
+    assert math.isfinite(second.refit_rmse_after)
     assert method.refit_count == 1
     assert method._block_theta is None
 
@@ -131,6 +148,7 @@ def test_refit_preserves_frozen_mmnn_features() -> None:
             jacobian_chunk_size=10, derivative_chunk_size=10, seed=12,
             refit_interval=1, refit_optimizer_steps=5,
             refit_learning_rate=1e-3, refit_batch_size=10,
+            refit_samples=20, refit_test_samples=10,
         ),
     )
     result = method.step(state, 0)
