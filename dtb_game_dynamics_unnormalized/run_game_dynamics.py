@@ -12,7 +12,9 @@ def parse_args() -> argparse.Namespace:
         description="Neural--DTB distributional game dynamics with score transport"
     )
     parser.add_argument(
-        "--game", choices=("linear", "cournot", "cournot3", "cournot5"), default="cournot"
+        "--game",
+        choices=("linear", "cournot", "cournot3", "cournot5", "network"),
+        default="cournot",
     )
     parser.add_argument("--dim", type=int, default=2)
     parser.add_argument("--particles", type=int, default=256, help="particle count N")
@@ -91,6 +93,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--linear-rotation", type=float, default=0.35)
     parser.add_argument("--cournot-b", type=float, default=1.0)
     parser.add_argument("--cournot-mu", type=float, default=2.0)
+    parser.add_argument(
+        "--network-density", type=float, default=0.25,
+        help="directed edge probability for --game network",
+    )
+    parser.add_argument(
+        "--network-scale", type=float, default=0.8,
+        help="spectral radius used to normalize the sampled interaction matrix",
+    )
+    parser.add_argument("--network-seed", type=int, default=17)
+    parser.add_argument(
+        "--network-bias-std", type=float, default=0.15,
+        help="standard deviation of the heterogeneous r_i coefficients",
+    )
+    parser.add_argument("--network-mu", type=float, default=1.0)
+    parser.add_argument("--network-beta", type=float, default=0.8)
 
     parser.add_argument(
         "--snapshot-times",

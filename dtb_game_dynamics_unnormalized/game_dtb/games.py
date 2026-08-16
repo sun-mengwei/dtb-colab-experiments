@@ -5,6 +5,104 @@ from __future__ import annotations
 import torch
 
 
+def nonlinear_network_payoff(
+    x: torch.Tensor,
+    interaction_matrix: torch.Tensor,
+    bias: torch.Tensor,
+    mu: torch.Tensor,
+    beta: torch.Tensor,
+) -> torch.Tensor:
+    r"""Payoffs for a smooth, nonconcave directed network game.
+
+    Player ``i`` has payoff
+
+    ``Pi_i = r_i*x_i + 0.5*mu_i*x_i^2 - 0.25*x_i^4``
+    ``       + beta_i*x_i*tanh(sum_j G_ij*x_j)``.
+
+    The diagonal of ``G`` must be zero.  Consequently the network aggregate
+    does not change when player ``i`` differentiates with respect to its own
+    action, and the own-action payoff gradient is exactly
+    ``nonlinear_network_drift``.  A nonsymmetric ``G`` makes this a
+    non-potential game in general.
+    """
+
+    _validate_network_game_inputs(x, interaction_matrix, bias, mu, beta)
+    aggregate = x @ interaction_matrix.T
+    return (
+        bias * x
+        + 0.5 * mu * x.square()
+        - 0.25 * x.pow(4)
+        + beta * x * torch.tanh(aggregate)
+    )
+
+
+def nonlinear_network_drift(
+    x: torch.Tensor,
+    interaction_matrix: torch.Tensor,
+    bias: torch.Tensor,
+    mu: torch.Tensor,
+    beta: torch.Tensor,
+) -> torch.Tensor:
+    r"""Stacked payoff-gradient dynamics for the nonlinear network game.
+
+    The equilibrium equation is
+
+    ``0 = r_i + mu_i*x_i - x_i^3 + beta_i*tanh((Gx)_i)``.
+
+    It can have many roots, while the directed interactions make dynamical
+    stability depend on the spectrum of a nonsymmetric Jacobian.
+    """
+
+    _validate_network_game_inputs(x, interaction_matrix, bias, mu, beta)
+    aggregate = x @ interaction_matrix.T
+    return bias + mu * x - x.pow(3) + beta * torch.tanh(aggregate)
+
+
+def nonlinear_network_jacobian(
+    x: torch.Tensor,
+    interaction_matrix: torch.Tensor,
+    mu: torch.Tensor,
+    beta: torch.Tensor,
+) -> torch.Tensor:
+    r"""Analytic state Jacobian of ``nonlinear_network_drift``.
+
+    For one point this returns shape ``(d,d)``; for a batch with shape
+    ``(...,d)`` it returns ``(...,d,d)``.
+    """
+
+    dim = x.shape[-1]
+    zero_bias = torch.zeros(dim, device=x.device, dtype=x.dtype)
+    _validate_network_game_inputs(
+        x, interaction_matrix, zero_bias, mu, beta
+    )
+    aggregate = x @ interaction_matrix.T
+    diagonal = torch.diag_embed(mu - 3.0 * x.square())
+    coupling_scale = beta * (1.0 - torch.tanh(aggregate).square())
+    return diagonal + torch.diag_embed(coupling_scale) @ interaction_matrix
+
+
+def _validate_network_game_inputs(
+    x: torch.Tensor,
+    interaction_matrix: torch.Tensor,
+    bias: torch.Tensor,
+    mu: torch.Tensor,
+    beta: torch.Tensor,
+) -> None:
+    """Check the shapes and zero-self-interaction assumption once per call."""
+
+    if x.ndim < 1 or x.shape[-1] < 2:
+        raise ValueError("the nonlinear network game needs at least two players")
+    dim = x.shape[-1]
+    if interaction_matrix.shape != (dim, dim):
+        raise ValueError(f"interaction_matrix must have shape ({dim},{dim})")
+    for name, value in (("bias", bias), ("mu", mu), ("beta", beta)):
+        if value.shape not in (torch.Size([]), torch.Size([dim])):
+            raise ValueError(f"{name} must be scalar or have shape ({dim},)")
+    diagonal = torch.diagonal(interaction_matrix)
+    if bool(torch.any(diagonal != 0)):
+        raise ValueError("interaction_matrix must have a zero diagonal")
+
+
 def cournot_multiplayer_payoff(
     x: torch.Tensor, b: float = 1.0, mu: float = 2.0, d: float = 0.0
 ) -> torch.Tensor:
