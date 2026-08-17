@@ -111,54 +111,6 @@ reports:
 
 Candidate discovery is not a proof that all equilibria have been found.
 
-### Oscillatory multi-well potential game
-
-The standalone controlled sweep in `run_oscillatory_potential_game.py` tests
-whether a fixed tangent representation becomes less accurate as the spatial
-frequency of a two-player potential game increases:
-
-```text
-Phi = -(lambda/2)*(x1^2+x2^2) -(gamma/2)*(x1-x2)^2
-      +(epsilon/omega)*(cos(omega*x1)+cos(omega*x2))
-b    = grad(Phi).
-```
-
-The requested defaults are `lambda=epsilon=0.5`, frequencies
-`2*pi,4*pi,8*pi,16*pi`, and coupling groups `gamma=0,0.2`. One initial
-particle array and one neural initialization are reused and verified across
-all eight runs. Diffusion is zero so both methods solve the deterministic game
-ODE; the reference is vectorized high-accuracy RK4 on the identical labels.
-
-Start with the complete eight-case smoke workflow:
-
-```bash
-python run_oscillatory_potential_game.py \
-  --smoke --device auto \
-  --output-root outputs/oscillatory_potential_game_smoke
-```
-
-Then run the full controlled setup:
-
-```bash
-python run_oscillatory_potential_game.py \
-  --particles 2000 --steps 200 --step-size 0.005 \
-  --width 32 --depth 4 --basis-size 128 --svd-rtol 1e-3 \
-  --reference-substeps 20 --device auto \
-  --output-root outputs/oscillatory_potential_game
-```
-
-Each case saves the potential/vector field, stable and unstable equilibria,
-reference/DTB particles, projection and trajectory errors, velocity RMSE,
-complete SVD diagnostics, mean potential, basin masses, and raw arrays. The
-sweep root contains `summary.csv`, `summary.md`, two coupling-specific
-frequency comparisons, and `final_error_vs_frequency.png`. Basin error is
-reported as unavailable when the assignment criterion is not reliable.
-
-Use
-`notebooks/oscillatory_potential_game_colab.ipynb` to change frequencies,
-couplings, architecture, tangent size, reset interval, reference accuracy, or
-particle/time settings from one labeled Colab setup block.
-
 ## Fastest replication
 
 Create an environment and install dependencies:
@@ -432,7 +384,6 @@ replicate_thesis_figures.py    one-command Figures 4.2/4.3 workflow
 replicate_three_player_game.py one-command Figures 4.5/4.6 workflow
 replicate_five_player_game.py  one-command Section 4.7.4 workflow
 run_nonlinear_network_game.py   high-dimensional unknown-equilibrium workflow
-run_oscillatory_potential_game.py controlled multi-well frequency sweep
 compare_five_player_depths.py  matched depth-2/depth-4 comparison
 compare_three_player_architectures.py  500-sample MLP/MMNN pilot
 compare_two_player_mlp_node.py         1000-sample MLP/NODE pilot
