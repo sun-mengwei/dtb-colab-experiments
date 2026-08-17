@@ -95,9 +95,6 @@ values `x_i^k=X_k(z_i)`.
   reference-law samples, and Adam with cosine learning-rate decay.
 - Refit-event, before/after RMSE, absolute projection-error, target-norm, and
   tangent-block-age diagnostics.
-- A high-dimensional nonlinear directed network game with reproducible
-  interactions, analytic state Jacobian, automatic root-candidate refinement,
-  PCA diagnostics, and separate dynamical-stability/local-Nash labels.
 
 ## Reuse and isolation
 
@@ -108,7 +105,7 @@ unchanged; all additions live under `dtb_game_dynamics_unnormalized/`.
 
 ## Validation
 
-Twenty-eight tests cover:
+Twenty-four tests cover:
 
 - unnormalized stacking;
 - tangent-span least-squares recovery;
@@ -127,8 +124,6 @@ Twenty-eight tests cover:
   saturation diagnostics.
 - periodic block resetting, fresh reference train/test sampling, exact reset
   timing, and preservation of frozen MMNN feature parameters.
-- nonlinear-network payoff-gradient consistency, analytic Jacobian accuracy,
-  reproducible spectral-radius normalization, and root refinement.
 
 End-to-end 2D, 3D, and 5D runs produced finite six-time DTB panels; the 2D/3D
 presets and the five-player depth-2 run also produced direct SDE panels.

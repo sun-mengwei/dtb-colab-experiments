@@ -8,16 +8,11 @@ from game_dtb.games import (
     cournot_five_player_drift,
     cournot_multiplayer_payoff,
     cournot_three_player_drift,
-    nonlinear_network_drift,
-    nonlinear_network_jacobian,
-    nonlinear_network_payoff,
 )
-from game_dtb.network_analysis import refine_network_equilibrium
 from game_dtb.runner import (
     _equilibria,
     _equilibrium_stability,
     diffusion_entry_from_noise,
-    nonlinear_network_parameters,
     snapshot_schedule,
 )
 
@@ -111,80 +106,3 @@ def test_thesis_noise_amplitude_gives_algorithm_diffusion() -> None:
 def test_figure_snapshot_schedule() -> None:
     schedule = snapshot_schedule("0,0.2,0.4,0.6,0.8,1.0", 50, 0.02)
     assert schedule == {0: 0.0, 10: 0.2, 20: 0.4, 30: 0.6, 40: 0.8, 50: 1.0}
-    assert snapshot_schedule("auto", 2, 0.01) == {0: 0.0, 1: 0.01, 2: 0.02}
-
-
-def test_nonlinear_network_payoff_gradient_matches_drift() -> None:
-    x = torch.tensor([0.3, -0.7, 0.2], dtype=torch.float64)
-    matrix = torch.tensor(
-        [[0.0, 0.4, -0.2], [-0.1, 0.0, 0.5], [0.3, -0.6, 0.0]],
-        dtype=torch.float64,
-    )
-    bias = torch.tensor([0.1, -0.2, 0.05], dtype=torch.float64)
-    mu = torch.tensor([0.9, 1.1, 0.8], dtype=torch.float64)
-    beta = torch.tensor([0.7, 0.6, 0.9], dtype=torch.float64)
-    payoff_jacobian = torch.func.jacrev(
-        lambda value: nonlinear_network_payoff(value, matrix, bias, mu, beta)
-    )(x)
-    assert torch.allclose(
-        payoff_jacobian.diagonal(),
-        nonlinear_network_drift(x, matrix, bias, mu, beta),
-        atol=1e-12,
-    )
-
-
-def test_nonlinear_network_analytic_jacobian_matches_autodiff() -> None:
-    x = torch.tensor([0.3, -0.7, 0.2], dtype=torch.float64)
-    matrix = torch.tensor(
-        [[0.0, 0.4, -0.2], [-0.1, 0.0, 0.5], [0.3, -0.6, 0.0]],
-        dtype=torch.float64,
-    )
-    bias = torch.tensor([0.1, -0.2, 0.05], dtype=torch.float64)
-    mu = torch.tensor([0.9, 1.1, 0.8], dtype=torch.float64)
-    beta = torch.tensor([0.7, 0.6, 0.9], dtype=torch.float64)
-    automatic = torch.func.jacrev(
-        lambda value: nonlinear_network_drift(value, matrix, bias, mu, beta)
-    )(x)
-    analytic = nonlinear_network_jacobian(x, matrix, mu, beta)
-    assert torch.allclose(analytic, automatic, atol=1e-12)
-
-
-def test_network_generator_is_reproducible_and_normalized() -> None:
-    args = SimpleNamespace(
-        dim=12,
-        network_density=0.4,
-        network_scale=0.75,
-        network_seed=17,
-        network_bias_std=0.15,
-        network_mu=1.0,
-        network_beta=0.8,
-    )
-    first = nonlinear_network_parameters(args)
-    second = nonlinear_network_parameters(args)
-    assert all(
-        torch.equal(torch.from_numpy(a), torch.from_numpy(b))
-        for a, b in zip(first, second)
-    )
-    matrix = first[0]
-    assert torch.count_nonzero(torch.from_numpy(matrix).diagonal()) == 0
-    spectral_radius = max(abs(torch.linalg.eigvals(torch.from_numpy(matrix))))
-    assert math.isclose(float(spectral_radius), 0.75, rel_tol=1e-10)
-
-
-def test_network_equilibrium_refinement_finds_decoupled_stable_root() -> None:
-    matrix = torch.zeros((2, 2), dtype=torch.float64).numpy()
-    bias = torch.zeros(2, dtype=torch.float64).numpy()
-    mu = torch.ones(2, dtype=torch.float64).numpy()
-    beta = torch.zeros(2, dtype=torch.float64).numpy()
-    root, residual = refine_network_equilibrium(
-        torch.tensor([0.8, -0.8], dtype=torch.float64).numpy(),
-        matrix,
-        bias,
-        mu,
-        beta,
-    )
-    assert residual < 1e-7
-    assert torch.allclose(
-        torch.from_numpy(root), torch.tensor([1.0, -1.0], dtype=torch.float64),
-        atol=1e-6,
-    )

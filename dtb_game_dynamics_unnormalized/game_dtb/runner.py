@@ -18,7 +18,6 @@ from .games import (
     cournot_five_player_drift,
     cournot_three_player_drift,
     linear_quadratic_drift,
-    nonlinear_network_drift,
 )
 from .models import TangentMLP, TangentMMNN, TangentNODE
 from .state import gaussian_particle_state, uniform_box_particle_state
@@ -53,8 +52,7 @@ def snapshot_schedule(text: str, steps: int, step_size: float) -> dict[int, floa
         raise ValueError("steps and step_size must be positive")
     final_time = steps * step_size
     if text == "auto":
-        indices = np.unique(np.rint(np.linspace(0, steps, 6)).astype(int))
-        return {int(index): float(index * step_size) for index in indices}
+        requested = np.linspace(0.0, final_time, 6).tolist()
     else:
         requested = [float(item.strip()) for item in text.split(",") if item.strip()]
     if not requested:
@@ -319,16 +317,6 @@ def run_experiment(args: Any) -> Path:
         "snapshot_times": ordered_snapshot_times,
         "snapshot_particles": ordered_snapshots,
     }
-    if args.game == "network":
-        interaction_matrix, bias, mu, beta = nonlinear_network_parameters(args)
-        arrays.update(
-            {
-                "network_interaction_matrix": interaction_matrix,
-                "network_bias": bias,
-                "network_mu": mu,
-                "network_beta": beta,
-            }
-        )
     if baseline_snapshots is not None:
         arrays["sde_baseline_particles"] = baseline_snapshots
     np.savez(history_path, **arrays)
@@ -376,25 +364,6 @@ def run_experiment(args: Any) -> Path:
             "tanh_diagnostics_final": model.tanh_diagnostics(state.particles),
         }
     )
-    if args.game == "network":
-        interaction_matrix, bias, mu, beta = nonlinear_network_parameters(args)
-        metadata["network_game"] = {
-            "payoff": (
-                "Pi_i=r_i*x_i+(mu_i/2)*x_i^2-(1/4)*x_i^4+"
-                "beta_i*x_i*tanh(sum_j G_ij*x_j)"
-            ),
-            "equilibrium_equation": (
-                "0=r_i+mu_i*x_i-x_i^3+beta_i*tanh((Gx)_i)"
-            ),
-            "interaction_nonzeros": int(np.count_nonzero(interaction_matrix)),
-            "interaction_spectral_radius": float(
-                np.max(np.abs(np.linalg.eigvals(interaction_matrix)))
-            ),
-            "bias_l2_norm": float(np.linalg.norm(bias)),
-            "mu_range": [float(mu.min()), float(mu.max())],
-            "beta_range": [float(beta.min()), float(beta.max())],
-            "parameter_arrays": "history.npz",
-        }
     (output_dir / "config.json").write_text(json.dumps(metadata, indent=2) + "\n")
 
     equilibria = _equilibria(args)
@@ -487,75 +456,7 @@ def _make_drift(args: Any) -> Callable[[torch.Tensor], torch.Tensor]:
             contraction=args.linear_contraction,
             rotation=args.linear_rotation,
         )
-    if args.game == "network":
-        if args.dim < 2:
-            raise ValueError("the nonlinear network game requires --dim >= 2")
-        interaction_matrix, bias, mu, beta = nonlinear_network_parameters(args)
-        tensor_cache: dict[
-            tuple[torch.device, torch.dtype],
-            tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-        ] = {}
-
-        def network_drift(x: torch.Tensor) -> torch.Tensor:
-            key = (x.device, x.dtype)
-            if key not in tensor_cache:
-                tensor_cache[key] = tuple(
-                    torch.as_tensor(value, device=x.device, dtype=x.dtype)
-                    for value in (interaction_matrix, bias, mu, beta)
-                )
-            matrix_t, bias_t, mu_t, beta_t = tensor_cache[key]
-            return nonlinear_network_drift(
-                x, matrix_t, bias_t, mu_t, beta_t
-            )
-
-        return network_drift
     raise ValueError(f"unknown game: {args.game}")
-
-
-def nonlinear_network_parameters(
-    args: Any,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Create one reproducible directed network and player coefficients.
-
-    The raw sparse Gaussian matrix is rescaled to the requested spectral
-    radius.  This keeps the coupling strength comparable when ``dim`` or the
-    edge density changes.
-    """
-
-    dim = int(args.dim)
-    density = float(args.network_density)
-    scale = float(args.network_scale)
-    if dim < 2:
-        raise ValueError("network dimension must be at least two")
-    if not 0.0 <= density <= 1.0:
-        raise ValueError("network_density must lie in [0,1]")
-    if scale < 0.0:
-        raise ValueError("network_scale must be nonnegative")
-    if args.network_bias_std < 0.0:
-        raise ValueError("network_bias_std must be nonnegative")
-
-    generator = np.random.default_rng(int(args.network_seed))
-    mask = generator.random((dim, dim)) < density
-    np.fill_diagonal(mask, False)
-    interaction_matrix = generator.normal(size=(dim, dim)) * mask
-    spectral_radius = float(
-        np.max(np.abs(np.linalg.eigvals(interaction_matrix)))
-    )
-    if scale == 0.0:
-        interaction_matrix.fill(0.0)
-    elif spectral_radius <= np.finfo(float).eps:
-        raise ValueError(
-            "the sampled network has no usable edges; increase network_density "
-            "or choose another network_seed"
-        )
-    else:
-        interaction_matrix *= scale / spectral_radius
-    np.fill_diagonal(interaction_matrix, 0.0)
-
-    bias = generator.normal(0.0, args.network_bias_std, size=dim)
-    mu = np.full(dim, args.network_mu, dtype=float)
-    beta = np.full(dim, args.network_beta, dtype=float)
-    return interaction_matrix, bias, mu, beta
 
 
 def _equilibria(args: Any) -> np.ndarray:
@@ -581,7 +482,7 @@ def _equilibria(args: Any) -> np.ndarray:
         return np.vstack([np.zeros(5), symmetric, np.asarray(one_zero)])
     if args.game == "linear":
         return np.asarray([[args.linear_target, args.linear_target]])
-    return np.empty((0, args.dim))
+    return np.empty((0, 2))
 
 
 def _equilibrium_stability(args: Any) -> np.ndarray:
@@ -647,8 +548,8 @@ def _plot_snapshots(
     columns = min(3, count)
     rows = int(math.ceil(count / columns))
     dim = snapshots.shape[-1]
-    if dim < 2:
-        raise ValueError("snapshot plotting requires at least two dimensions")
+    if dim not in (2, 3, 5):
+        raise ValueError("snapshot plotting currently supports d=2, d=3, or d=5")
     if equilibrium_is_stable.shape != (len(equilibria),):
         raise ValueError("equilibrium stability labels must align with equilibria")
     subplot_kw = {"projection": "3d"} if dim == 3 else {}
@@ -712,7 +613,7 @@ def _plot_snapshots(
                 va="top",
                 fontsize=10,
             )
-        elif dim > 3:
+        elif dim == 5:
             opponents_mean = particles[:, 1:].mean(axis=1)
             axis.scatter(
                 particles[:, 0], opponents_mean, s=point_size, alpha=point_alpha,
@@ -745,7 +646,7 @@ def _plot_snapshots(
                     )
             axis.set_aspect("equal", adjustable="box")
             axis.set_xlabel(r"$x_1$")
-            axis.set_ylabel(rf"mean$(x_2,\ldots,x_{{{dim}}})$")
+            axis.set_ylabel(r"mean$(x_2,\ldots,x_5)$")
             axis.text(
                 0.5,
                 -0.29,
@@ -794,7 +695,7 @@ def _plot_snapshots(
             )
         axis.set_xlim(plot_low, plot_high)
         axis.set_ylim(plot_low, plot_high)
-        if dim <= 3:
+        if dim != 5:
             axis.set_xlabel(r"$x_1$")
             axis.set_ylabel(r"$x_2$")
         axis.grid(alpha=0.45)

@@ -1,4 +1,4 @@
-# Colab Tutorial: Run the DTB Game Experiments from GitHub
+# Colab Tutorial: Reproduce the 2D, 3D, and 5D Games from GitHub
 
 Colab **clones** source code from GitHub into temporary runtime storage. Google
 Drive is mounted later only to preserve generated outputs.
@@ -88,7 +88,7 @@ if torch.cuda.is_available():
 !python -m pytest
 ```
 
-Expected: `28 passed`.
+Expected: `24 passed`.
 
 ## 4A. Periodic-refit controls in the controlled notebook
 
@@ -313,47 +313,7 @@ paper-scale preset uses `m=256`, `h=0.005`, and 200 steps. These are documented
 replication choices because the exact source values are not visible in the
 supplied screenshot.
 
-## 14. Run the unknown-equilibrium nonlinear network game
-
-Open the dedicated notebook
-`notebooks/nonlinear_network_game_colab.ipynb`, or run the driver directly:
-
-```python
-!python run_nonlinear_network_game.py \
-  --dim 20 \
-  --particles 512 \
-  --depth 4 \
-  --basis-size 128 \
-  --svd-rtol 1e-3 \
-  --device auto \
-  --output-dir outputs/nonlinear_network_game
-```
-
-Display the distribution and equilibrium-candidate diagnostics:
-
-```python
-import pandas as pd
-from IPython.display import Image, display
-
-display(Image("outputs/nonlinear_network_game/dtb_snapshots.png"))
-display(Image("outputs/nonlinear_network_game/diagnostics.png"))
-display(Image("outputs/nonlinear_network_game/network_equilibrium_analysis.png"))
-display(pd.read_csv("outputs/nonlinear_network_game/equilibrium_candidates.csv"))
-```
-
-Red circles are dynamically stable candidate roots; gold `X` markers are
-unstable candidates. Stability means `max Re eig(Db)<0`. The CSV separately
-records whether every own-action payoff curvature is negative. These roots are
-refined from selected terminal particles, so the list is not guaranteed to
-contain every equilibrium, especially unstable equilibria that attract no
-particle mass.
-
-For a quick setup test, use `--dim 8 --particles 128 --steps 25 --width 16
---depth 2 --basis-size 32 --skip-sde-baseline`. For a controlled dimension
-study, keep `--network-seed`, density, scale, time step, and SVD tolerance
-fixed while changing `--dim`.
-
-## 15. Save results to Drive
+## 14. Save results to Drive
 
 Colab runtime files disappear when the session ends:
 
@@ -372,7 +332,7 @@ drive.mount("/content/drive")
 !cp dtb_game_replication.zip "/content/drive/MyDrive/"
 ```
 
-## 16. Pull later changes
+## 15. Pull later changes
 
 ```python
 %cd /content/dtb-colab-experiments

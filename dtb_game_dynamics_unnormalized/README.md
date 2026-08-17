@@ -1,4 +1,4 @@
-# Neural–DTB Experiments for Low- and High-Dimensional Non-Potential Games
+# Neural–DTB Replication of 2D, 3D, and 5D Non-Potential Games
 
 This self-contained folder implements the supplied unnormalized Neural–DTB
 algorithm and uses it to reproduce the qualitative behavior of target Figures
@@ -87,30 +87,6 @@ negative, it is projected to zero. The five-player drift is therefore
 `2b*(max(mu*r_i*(1-r_i),0)-x_i)`. This projection is necessary for the source's
 five one-zero points to be equilibria.
 
-### High-dimensional nonlinear network game
-
-The added research example has one scalar action per player and a reproducible
-directed interaction matrix `G` with zero diagonal:
-
-```text
-Pi_i = r_i*x_i + (mu_i/2)*x_i^2 - (1/4)*x_i^4
-       + beta_i*x_i*tanh(sum_j G_ij*x_j)
-b_i  = r_i + mu_i*x_i - x_i^3 + beta_i*tanh((Gx)_i).
-```
-
-The quartic term bounds each payoff from above, while the double-well term and
-directed coupling can produce many unknown stationary points. The experiment
-normalizes `G` to a requested spectral radius so coupling strengths remain
-comparable as the number of players changes. It discovers candidate roots from
-terminal particles, refines `b(x)=0` with damped Newton steps, and separately
-reports:
-
-- stationarity residual `||b(x*)||_2`;
-- dynamical stability through `max Re eig(Db(x*))`;
-- the local-Nash second-order test `mu_i-3*x_i^2 < 0` for every player.
-
-Candidate discovery is not a proof that all equilibria have been found.
-
 ## Fastest replication
 
 Create an environment and install dependencies:
@@ -126,21 +102,6 @@ Run the mathematical tests:
 ```bash
 python -m pytest
 ```
-
-Run the 20-player nonlinear directed network game:
-
-```bash
-python run_nonlinear_network_game.py \
-  --dim 20 --particles 512 --depth 4 --basis-size 128 \
-  --svd-rtol 1e-3 --device auto \
-  --output-dir outputs/nonlinear_network_game
-```
-
-The outputs include `network_equilibrium_analysis.png`,
-`equilibrium_candidates.csv`, and the exact `G,r,mu,beta` arrays in
-`history.npz`. Use `--network-seed`, `--network-density`, and
-`--network-scale` for controlled network comparisons. The dedicated Colab
-notebook is `notebooks/nonlinear_network_game_colab.ipynb`.
 
 Run both target experiments with Colab-friendly settings:
 
@@ -383,7 +344,6 @@ run_game_dynamics.py           configurable single experiment
 replicate_thesis_figures.py    one-command Figures 4.2/4.3 workflow
 replicate_three_player_game.py one-command Figures 4.5/4.6 workflow
 replicate_five_player_game.py  one-command Section 4.7.4 workflow
-run_nonlinear_network_game.py   high-dimensional unknown-equilibrium workflow
 compare_five_player_depths.py  matched depth-2/depth-4 comparison
 compare_three_player_architectures.py  500-sample MLP/MMNN pilot
 compare_two_player_mlp_node.py         1000-sample MLP/NODE pilot
@@ -413,11 +373,9 @@ the direct SDE baseline and run refinement studies.
   overlap in the summary projection.
 - Because all seven reported 5D equilibria are unstable, distance to them is a
   diagnostic rather than a convergence target.
-- Network-game root refinement starts from terminal particles and therefore
-  favors attracting regions; unstable or remote equilibria can be missed.
 - The source screenshot does not expose every training/numerical parameter.
-- Periodic refitting is optional; `--refit-interval 0` keeps the neural
-  parameters fixed for controlled comparisons.
+- The neural parameters stay fixed because the supplied algorithm does not
+  prescribe the original Allen–Cahn periodic reset/refit rule.
 - Strong conclusions require step-size, particle-count, tangent-basis, and SVD
   tolerance refinement.
 - The MLP/MMNN comparison is one seed and one MMNN rank. It demonstrates the

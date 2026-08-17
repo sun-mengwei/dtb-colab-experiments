@@ -8,9 +8,6 @@ from .games import (
     cournot_multiplayer_drift,
     cournot_three_player_drift,
     linear_quadratic_drift,
-    nonlinear_network_drift,
-    nonlinear_network_jacobian,
-    nonlinear_network_payoff,
 )
 from .models import TangentMLP, TangentMMNN
 from .state import ParticleState, gaussian_particle_state, uniform_box_particle_state
@@ -28,8 +25,5 @@ __all__ = [
     "cournot_three_player_drift",
     "gaussian_particle_state",
     "linear_quadratic_drift",
-    "nonlinear_network_drift",
-    "nonlinear_network_jacobian",
-    "nonlinear_network_payoff",
     "uniform_box_particle_state",
 ]
