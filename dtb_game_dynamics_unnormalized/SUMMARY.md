@@ -98,6 +98,10 @@ values `x_i^k=X_k(z_i)`.
 - A high-dimensional nonlinear directed network game with reproducible
   interactions, analytic state Jacobian, automatic root-candidate refinement,
   PCA diagnostics, and separate dynamical-stability/local-Nash labels.
+- A controlled oscillatory potential-game frequency sweep with shared particle
+  and neural initialization, high-accuracy RK4 reference trajectories,
+  numerical equilibrium/basin analysis, full SVD diagnostics, and separate
+  smoke/full Colab configurations.
 
 ## Reuse and isolation
 
@@ -108,7 +112,7 @@ unchanged; all additions live under `dtb_game_dynamics_unnormalized/`.
 
 ## Validation
 
-Twenty-eight tests cover:
+Thirty-one tests cover:
 
 - unnormalized stacking;
 - tangent-span least-squares recovery;
@@ -129,6 +133,8 @@ Twenty-eight tests cover:
   timing, and preservation of frozen MMNN feature parameters.
 - nonlinear-network payoff-gradient consistency, analytic Jacobian accuracy,
   reproducible spectral-radius normalization, and root refinement.
+- oscillatory-potential pseudo-gradient and state-Jacobian agreement with
+  automatic differentiation, plus reproducibility of the shared particle set.
 
 End-to-end 2D, 3D, and 5D runs produced finite six-time DTB panels; the 2D/3D
 presets and the five-player depth-2 run also produced direct SDE panels.

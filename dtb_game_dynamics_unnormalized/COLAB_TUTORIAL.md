@@ -88,7 +88,7 @@ if torch.cuda.is_available():
 !python -m pytest
 ```
 
-Expected: `28 passed`.
+Expected: `31 passed`.
 
 ## 4A. Periodic-refit controls in the controlled notebook
 
@@ -353,7 +353,36 @@ For a quick setup test, use `--dim 8 --particles 128 --steps 25 --width 16
 study, keep `--network-seed`, density, scale, time step, and SVD tolerance
 fixed while changing `--dim`.
 
-## 15. Save results to Drive
+## 15. Run the oscillatory multi-well potential-game sweep
+
+Open `notebooks/oscillatory_potential_game_colab.ipynb`. Its setup block
+exposes the frequency/coupling lists, particles, physical grid, architecture,
+tangent size, SVD tolerance, periodic-reset controls, RK4 reference accuracy,
+and basin-assignment thresholds.
+
+Run the all-eight-case smoke test first:
+
+```python
+!python run_oscillatory_potential_game.py \
+  --smoke --device auto \
+  --output-root outputs/oscillatory_potential_game_smoke
+```
+
+Run the full requested setup with:
+
+```python
+!python run_oscillatory_potential_game.py \
+  --particles 2000 --steps 200 --step-size 0.005 \
+  --width 32 --depth 4 --basis-size 128 --svd-rtol 1e-3 \
+  --reference-substeps 20 --device auto \
+  --output-root outputs/oscillatory_potential_game
+```
+
+The full sweep is computationally substantial. Keep the Colab tab connected,
+use a GPU runtime, and save the output folder to Drive when it completes. Do
+not interpret smoke-mode error trends as scientific evidence.
+
+## 16. Save results to Drive
 
 Colab runtime files disappear when the session ends:
 
@@ -372,7 +401,7 @@ drive.mount("/content/drive")
 !cp dtb_game_replication.zip "/content/drive/MyDrive/"
 ```
 
-## 16. Pull later changes
+## 17. Pull later changes
 
 ```python
 %cd /content/dtb-colab-experiments
