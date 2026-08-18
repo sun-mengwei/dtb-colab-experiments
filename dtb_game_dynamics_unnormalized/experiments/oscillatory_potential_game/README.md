@@ -35,9 +35,11 @@ Run the prepared notebook directly in Google Colab:
 
 [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sun-mengwei/dtb-colab-experiments/blob/codex/game-dynamics-dtb/dtb_game_dynamics_unnormalized/notebooks/oscillatory_potential_game_colab.ipynb)
 
-The notebook installs the branch, runs the tests, executes all eight smoke
-cases, displays the standard-RK4 versus DTB particle snapshots, and exposes a
-single switch for the full `N=2000` sweep.
+The compact notebook runs one `(gamma, lambda)` case from top to bottom. It
+defines the game, initialization, RK4 solver, DTB loop, stability check, and
+plots directly in its cells while importing only the existing DTB core. It
+shows the projection residual and separate RK4 and DTB particle snapshots;
+the multi-case sweep and detailed tables remain available through the CLI.
 
 First run the complete workflow with the small preset:
 
