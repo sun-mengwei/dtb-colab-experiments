@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
@@ -21,6 +22,103 @@ from .games import (
 )
 from .models import TangentMLP, TangentMMNN, TangentNODE
 from .state import gaussian_particle_state, uniform_box_particle_state
+
+
+def dtb_progress_milestones(
+    total_steps: int, report_count: int = 10
+) -> tuple[int, ...]:
+    """Return distinct, increasing step indices for percentage reports."""
+
+    if total_steps < 1 or report_count < 1:
+        raise ValueError("total_steps and report_count must be positive")
+    return tuple(
+        sorted(
+            {
+                math.ceil(total_steps * report_index / report_count)
+                for report_index in range(1, report_count + 1)
+            }
+        )
+    )
+
+
+def projection_error_metrics(
+    result: Any, particle_count: int
+) -> tuple[float, float]:
+    """Return relative residual and vector RMSE per particle."""
+
+    relative = float(result.diagnostics.relative_residual)
+    residual_norm = relative * float(result.target_velocity_norm)
+    particle_rmse = residual_norm / math.sqrt(particle_count)
+    return relative, particle_rmse
+
+
+def _format_duration(seconds: float) -> str:
+    rounded = max(0, int(round(seconds)))
+    hours, remainder = divmod(rounded, 3600)
+    minutes, seconds_part = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {seconds_part:02d}s"
+    if minutes:
+        return f"{minutes}m {seconds_part:02d}s"
+    return f"{seconds_part}s"
+
+
+class DTBProgressReporter:
+    """Print DTB projection quality and timing at ten progress milestones."""
+
+    def __init__(
+        self,
+        *,
+        total_steps: int,
+        step_size: float,
+        particle_count: int,
+        basis_size: int,
+        device: torch.device,
+        report_count: int = 10,
+    ) -> None:
+        self.total_steps = total_steps
+        self.step_size = step_size
+        self.particle_count = particle_count
+        self.basis_size = basis_size
+        self.device = device
+        self.milestones = frozenset(
+            dtb_progress_milestones(total_steps, report_count)
+        )
+        self.reported: set[int] = set()
+        self.started_at = time.perf_counter()
+
+    def update(
+        self,
+        *,
+        completed_step: int,
+        result: Any,
+        refit_count: int,
+    ) -> bool:
+        """Print one milestone report and return whether anything was printed."""
+
+        if completed_step not in self.milestones or completed_step in self.reported:
+            return False
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
+
+        elapsed = time.perf_counter() - self.started_at
+        fraction = completed_step / self.total_steps
+        eta = elapsed * (1.0 - fraction) / fraction
+        percentage = round(100.0 * fraction)
+        relative, particle_rmse = projection_error_metrics(
+            result, self.particle_count
+        )
+        rank = result.diagnostics.retained_rank
+        physical_time = completed_step * self.step_size
+        print(
+            f"DTB {percentage:3d}% | step {completed_step}/{self.total_steps} "
+            f"| t={physical_time:.4f} | projection: relative={relative:.3e}, "
+            f"particle-RMSE={particle_rmse:.3e} | rank={rank}/{self.basis_size} "
+            f"| refits={refit_count} | elapsed={_format_duration(elapsed)} "
+            f"| ETA={_format_duration(eta)}"
+        )
+        self.reported.add(completed_step)
+        return True
 
 
 def resolve_device(requested: str) -> torch.device:
@@ -229,6 +327,13 @@ def run_experiment(args: Any) -> Path:
     snapshot_particles: dict[int, np.ndarray] = {}
     if 0 in schedule:
         snapshot_particles[0] = initial_particles.copy()
+    progress_reporter = DTBProgressReporter(
+        total_steps=args.steps,
+        step_size=args.step_size,
+        particle_count=state.particles.shape[0],
+        basis_size=min(config.basis_size, method.parameter_count),
+        device=device,
+    )
 
     for step in range(args.steps):
         result = method.step(state, step)
@@ -251,15 +356,11 @@ def run_experiment(args: Any) -> Path:
         steps_in_tangent_block.append(result.steps_in_tangent_block)
         if completed in schedule:
             snapshot_particles[completed] = state.particles.detach().cpu().numpy().copy()
-        if args.print_every > 0 and (
-            completed % args.print_every == 0 or step == 0
-        ):
-            mean_text = np.array2string(means[-1], precision=4)
-            print(
-                f"step {completed:4d}/{args.steps} t={times[-1]:.4f} "
-                f"mean={mean_text} residual={residuals[-1]:.3e} "
-                f"rank={ranks[-1]} |alpha|={alpha_norms[-1]:.3e}"
-            )
+        progress_reporter.update(
+            completed_step=completed,
+            result=result,
+            refit_count=method.refit_count,
+        )
         if result.refit_performed:
             print(
                 f"  refit #{method.refit_count} ({result.refit_reason}) "
