@@ -31,6 +31,14 @@ exactly the game velocity because `D=0`.
 
 ## Run
 
+Run the prepared notebook directly in Google Colab:
+
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sun-mengwei/dtb-colab-experiments/blob/codex/game-dynamics-dtb/dtb_game_dynamics_unnormalized/notebooks/oscillatory_potential_game_colab.ipynb)
+
+The notebook installs the branch, runs the tests, executes all eight smoke
+cases, displays the standard-RK4 versus DTB particle snapshots, and exposes a
+single switch for the full `N=2000` sweep.
+
 First run the complete workflow with the small preset:
 
 ```bash

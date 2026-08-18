@@ -95,6 +95,8 @@ velocities. It reuses the existing DTB solver and records a tighter RK4
 reference, trajectory errors, potential evolution, equilibrium basin masses,
 and complete truncated-SVD diagnostics.
 
+[![Open the oscillatory experiment in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sun-mengwei/dtb-colab-experiments/blob/codex/game-dynamics-dtb/dtb_game_dynamics_unnormalized/notebooks/oscillatory_potential_game_colab.ipynb)
+
 Run the end-to-end check first, then the `N=2000` sweep:
 
 ```bash
