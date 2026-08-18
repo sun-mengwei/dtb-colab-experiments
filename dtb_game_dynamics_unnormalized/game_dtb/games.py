@@ -2,7 +2,114 @@
 
 from __future__ import annotations
 
+import math
+from dataclasses import dataclass
+
 import torch
+
+
+@dataclass(frozen=True)
+class OscillatoryGameParams:
+    r"""Parameters for the two-player oscillatory potential game.
+
+    The common payoff is
+
+    .. math::
+
+       \Phi(x) = -\frac{\lambda}{2}\lVert x\rVert^2
+       -\frac{\gamma}{2}(x_1-x_2)^2
+       +\frac{\epsilon}{\omega}\sum_i \cos(\omega x_i).
+
+    Both players ascend this potential, so the deterministic game velocity is
+    its gradient.  ``lambda_`` is named with a trailing underscore because
+    ``lambda`` is a Python keyword.
+    """
+
+    lambda_: float = 0.5
+    epsilon: float = 0.5
+    omega: float = 2.0 * math.pi
+    gamma: float = 0.0
+
+    def validate(self) -> None:
+        values = (self.lambda_, self.epsilon, self.omega, self.gamma)
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("oscillatory game parameters must be finite")
+        if self.lambda_ <= 0.0:
+            raise ValueError("lambda_ must be positive")
+        if self.epsilon < 0.0:
+            raise ValueError("epsilon must be nonnegative")
+        if self.omega <= 0.0:
+            raise ValueError("omega must be positive")
+        if self.gamma < 0.0:
+            raise ValueError("gamma must be nonnegative")
+
+
+def oscillatory_potential(
+    x: torch.Tensor, params: OscillatoryGameParams
+) -> torch.Tensor:
+    r"""Evaluate the identical-interest payoff ``Phi`` at ``(..., 2)`` points."""
+
+    _validate_two_player_points(x, "oscillatory potential game")
+    params.validate()
+    first, second = x.unbind(dim=-1)
+    confinement = -0.5 * params.lambda_ * (first.square() + second.square())
+    coupling = -0.5 * params.gamma * (first - second).square()
+    wells = (params.epsilon / params.omega) * (
+        torch.cos(params.omega * first) + torch.cos(params.omega * second)
+    )
+    return confinement + coupling + wells
+
+
+def oscillatory_game_velocity(
+    x: torch.Tensor, params: OscillatoryGameParams
+) -> torch.Tensor:
+    r"""Return the game pseudo-gradient ``b=grad(Phi)`` with shape ``(..., 2)``.
+
+    This is the drift/velocity supplied to :class:`NeuralDTBGameDynamics` for
+    the deterministic experiment (the diffusion matrix is zero).
+    """
+
+    _validate_two_player_points(x, "oscillatory potential game")
+    params.validate()
+    first, second = x.unbind(dim=-1)
+    first_velocity = (
+        -params.lambda_ * first
+        - params.gamma * (first - second)
+        - params.epsilon * torch.sin(params.omega * first)
+    )
+    second_velocity = (
+        -params.lambda_ * second
+        - params.gamma * (second - first)
+        - params.epsilon * torch.sin(params.omega * second)
+    )
+    return torch.stack((first_velocity, second_velocity), dim=-1)
+
+
+def oscillatory_game_jacobian(
+    x: torch.Tensor, params: OscillatoryGameParams
+) -> torch.Tensor:
+    r"""Return the analytic game Jacobian ``Db`` with shape ``(..., 2, 2)``."""
+
+    _validate_two_player_points(x, "oscillatory potential game")
+    params.validate()
+    diagonal = (
+        -params.lambda_
+        - params.gamma
+        - params.epsilon * params.omega * torch.cos(params.omega * x)
+    )
+    result = torch.zeros(
+        *x.shape[:-1], 2, 2, device=x.device, dtype=x.dtype
+    )
+    result[..., 0, 0] = diagonal[..., 0]
+    result[..., 1, 1] = diagonal[..., 1]
+    result[..., 0, 1] = params.gamma
+    result[..., 1, 0] = params.gamma
+    return result
+
+
+def _validate_two_player_points(x: torch.Tensor, game_name: str) -> None:
+    if x.ndim < 1 or x.shape[-1] != 2:
+        raise ValueError(f"the {game_name} requires points with shape (..., 2)")
 
 
 def cournot_multiplayer_payoff(

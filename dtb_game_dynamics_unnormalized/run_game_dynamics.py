@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 
 from game_dtb.runner import run_experiment
 
@@ -12,7 +13,9 @@ def parse_args() -> argparse.Namespace:
         description="Neural--DTB distributional game dynamics with score transport"
     )
     parser.add_argument(
-        "--game", choices=("linear", "cournot", "cournot3", "cournot5"), default="cournot"
+        "--game",
+        choices=("linear", "cournot", "cournot3", "cournot5", "oscillatory"),
+        default="cournot",
     )
     parser.add_argument("--dim", type=int, default=2)
     parser.add_argument("--particles", type=int, default=256, help="particle count N")
@@ -91,6 +94,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--linear-rotation", type=float, default=0.35)
     parser.add_argument("--cournot-b", type=float, default=1.0)
     parser.add_argument("--cournot-mu", type=float, default=2.0)
+    parser.add_argument("--oscillatory-lambda", type=float, default=0.5)
+    parser.add_argument("--oscillatory-epsilon", type=float, default=0.5)
+    parser.add_argument(
+        "--oscillatory-omega", type=float, default=2.0 * math.pi
+    )
+    parser.add_argument("--oscillatory-gamma", type=float, default=0.0)
 
     parser.add_argument(
         "--snapshot-times",
