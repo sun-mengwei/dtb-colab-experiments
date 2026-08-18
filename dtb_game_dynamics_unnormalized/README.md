@@ -87,28 +87,6 @@ negative, it is projected to zero. The five-player drift is therefore
 `2b*(max(mu*r_i*(1-r_i),0)-x_i)`. This projection is necessary for the source's
 five one-zero points to be equilibria.
 
-## Oscillatory potential-game sweep
-
-The repository also includes a controlled two-player experiment for testing a
-fixed neural tangent representation against increasingly oscillatory game
-velocities. It reuses the existing DTB solver and records a tighter RK4
-reference, trajectory errors, potential evolution, equilibrium basin masses,
-and complete truncated-SVD diagnostics.
-
-[![Open the oscillatory experiment in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/sun-mengwei/dtb-colab-experiments/blob/codex/game-dynamics-dtb/dtb_game_dynamics_unnormalized/notebooks/oscillatory_potential_game_colab.ipynb)
-
-Run the end-to-end check first, then the `N=2000` sweep:
-
-```bash
-python run_oscillatory_potential_game.py --smoke \
-  --output-root outputs/oscillatory_potential_game_smoke
-python run_oscillatory_potential_game.py \
-  --output-root outputs/oscillatory_potential_game_full
-```
-
-The equations, controlled-workflow map, CLI options, and output layout are in
-[`experiments/oscillatory_potential_game/`](experiments/oscillatory_potential_game/README.md).
-
 ## Fastest replication
 
 Create an environment and install dependencies:

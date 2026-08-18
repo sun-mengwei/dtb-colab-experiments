@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,15 +14,13 @@ import torch
 
 from .algorithm import DTBConfig, NeuralDTBGameDynamics
 from .games import (
-    OscillatoryGameParams,
     cournot_duopoly_drift,
     cournot_five_player_drift,
     cournot_three_player_drift,
     linear_quadratic_drift,
-    oscillatory_game_velocity,
 )
 from .models import TangentMLP, TangentMMNN, TangentNODE
-from .state import ParticleState, gaussian_particle_state, uniform_box_particle_state
+from .state import gaussian_particle_state, uniform_box_particle_state
 
 
 def resolve_device(requested: str) -> torch.device:
@@ -72,158 +70,6 @@ def snapshot_schedule(text: str, steps: int, step_size: float) -> dict[int, floa
             )
         schedule[index] = aligned
     return dict(sorted(schedule.items()))
-
-
-@dataclass(frozen=True)
-class DTBTrajectory:
-    """Full trajectory and solver diagnostics from :func:`run_dtb_trajectory`.
-
-    Particle and potential histories include time zero.  Projection/SVD
-    arrays have one entry per completed Euler step.
-    """
-
-    times: np.ndarray
-    particles: np.ndarray
-    projection_residuals: np.ndarray
-    velocity_rmse: np.ndarray
-    sigma_max: np.ndarray
-    sigma_min_retained: np.ndarray
-    retained_rank: np.ndarray
-    retained_condition: np.ndarray
-    truncated_count: np.ndarray
-    truncated_fraction: np.ndarray
-    alpha_norm: np.ndarray
-    target_velocity_norm: np.ndarray
-    projected_velocity_norm: np.ndarray
-    mean_divergence: np.ndarray
-    mean_potential: np.ndarray | None
-    refit_performed: np.ndarray
-    refit_rmse_before: np.ndarray
-    refit_rmse_after: np.ndarray
-    final_state: ParticleState
-
-
-def run_dtb_trajectory(
-    method: NeuralDTBGameDynamics,
-    initial_state: ParticleState,
-    steps: int,
-    *,
-    potential: Callable[[torch.Tensor], torch.Tensor] | None = None,
-    print_every: int = 0,
-) -> DTBTrajectory:
-    """Run the existing Neural--DTB stepper without changing its algorithm.
-
-    This lightweight runner is intended for controlled experiments that need
-    every particle position and the complete truncated-SVD diagnostics.  The
-    supplied ``method`` still owns tangent-coordinate selection, projection,
-    score transport, and periodic refitting.
-    """
-
-    if steps < 1:
-        raise ValueError("steps must be positive")
-    if print_every < 0:
-        raise ValueError("print_every must be nonnegative")
-    initial_state.validate()
-
-    state = initial_state
-    particle_history = [state.particles.detach().cpu().numpy().copy()]
-    potential_history: list[float] | None = [] if potential is not None else None
-    if potential_history is not None:
-        values = potential(state.particles)
-        if values.shape != (state.particles.shape[0],):
-            raise ValueError("potential must return one value per particle")
-        potential_history.append(float(values.mean()))
-
-    projection_residuals: list[float] = []
-    velocity_rmse: list[float] = []
-    sigma_max: list[float] = []
-    sigma_min_retained: list[float] = []
-    retained_rank: list[int] = []
-    retained_condition: list[float] = []
-    truncated_count: list[int] = []
-    truncated_fraction: list[float] = []
-    alpha_norm: list[float] = []
-    target_velocity_norm: list[float] = []
-    projected_velocity_norm: list[float] = []
-    mean_divergence: list[float] = []
-    refit_performed: list[bool] = []
-    refit_rmse_before: list[float] = []
-    refit_rmse_after: list[float] = []
-    actual_basis_size = min(method.config.basis_size, method.parameter_count)
-    particle_count = state.particles.shape[0]
-
-    for step in range(steps):
-        result = method.step(state, step)
-        state = result.state
-        diagnostics = result.diagnostics
-        condition = (
-            diagnostics.sigma_max / diagnostics.sigma_min_retained
-            if diagnostics.sigma_min_retained > 0.0
-            else float("inf")
-        )
-        truncated = actual_basis_size - diagnostics.retained_rank
-
-        projection_residuals.append(diagnostics.relative_residual)
-        velocity_rmse.append(
-            diagnostics.relative_residual
-            * result.target_velocity_norm
-            / math.sqrt(particle_count)
-        )
-        sigma_max.append(diagnostics.sigma_max)
-        sigma_min_retained.append(diagnostics.sigma_min_retained)
-        retained_rank.append(diagnostics.retained_rank)
-        retained_condition.append(condition)
-        truncated_count.append(truncated)
-        truncated_fraction.append(truncated / actual_basis_size)
-        alpha_norm.append(result.alpha_norm)
-        target_velocity_norm.append(result.target_velocity_norm)
-        projected_velocity_norm.append(result.projected_velocity_norm)
-        mean_divergence.append(result.mean_divergence)
-        refit_performed.append(result.refit_performed)
-        refit_rmse_before.append(result.refit_rmse_before)
-        refit_rmse_after.append(result.refit_rmse_after)
-        particle_history.append(state.particles.detach().cpu().numpy().copy())
-
-        if potential_history is not None:
-            values = potential(state.particles)
-            if values.shape != (particle_count,):
-                raise ValueError("potential must return one value per particle")
-            potential_history.append(float(values.mean()))
-
-        completed = step + 1
-        if print_every and (
-            completed == 1 or completed % print_every == 0 or completed == steps
-        ):
-            print(
-                f"step {completed:4d}/{steps} "
-                f"residual={diagnostics.relative_residual:.3e} "
-                f"rank={diagnostics.retained_rank}/{actual_basis_size} "
-                f"|alpha|={result.alpha_norm:.3e}"
-            )
-
-    return DTBTrajectory(
-        times=np.arange(steps + 1, dtype=float) * method.config.step_size,
-        particles=np.asarray(particle_history),
-        projection_residuals=np.asarray(projection_residuals),
-        velocity_rmse=np.asarray(velocity_rmse),
-        sigma_max=np.asarray(sigma_max),
-        sigma_min_retained=np.asarray(sigma_min_retained),
-        retained_rank=np.asarray(retained_rank),
-        retained_condition=np.asarray(retained_condition),
-        truncated_count=np.asarray(truncated_count),
-        truncated_fraction=np.asarray(truncated_fraction),
-        alpha_norm=np.asarray(alpha_norm),
-        target_velocity_norm=np.asarray(target_velocity_norm),
-        projected_velocity_norm=np.asarray(projected_velocity_norm),
-        mean_divergence=np.asarray(mean_divergence),
-        mean_potential=(
-            np.asarray(potential_history) if potential_history is not None else None
-        ),
-        refit_performed=np.asarray(refit_performed, dtype=bool),
-        refit_rmse_before=np.asarray(refit_rmse_before),
-        refit_rmse_after=np.asarray(refit_rmse_after),
-        final_state=state,
-    )
 
 
 def run_experiment(args: Any) -> Path:
@@ -583,17 +429,6 @@ def run_experiment(args: Any) -> Path:
 
 
 def _make_drift(args: Any) -> Callable[[torch.Tensor], torch.Tensor]:
-    if args.game == "oscillatory":
-        if args.dim != 2:
-            raise ValueError("the oscillatory potential game requires --dim 2")
-        params = OscillatoryGameParams(
-            lambda_=args.oscillatory_lambda,
-            epsilon=args.oscillatory_epsilon,
-            omega=args.oscillatory_omega,
-            gamma=args.oscillatory_gamma,
-        )
-        params.validate()
-        return lambda x: oscillatory_game_velocity(x, params)
     if args.game == "cournot":
         if args.dim != 2:
             raise ValueError("the Cournot example requires --dim 2")
