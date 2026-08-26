@@ -218,7 +218,7 @@ def selected_tangent_basis(
     feature_chunks, spatial_chunks = [], []
     for start in range(0, points.shape[0], chunk_size):
         chunk = points[start : start + chunk_size]
-        feature_chunks.append(vmap(feature_one, in_dims=(None, 0))(selected, chunk))
+        feature_chunks.append(vmap(feature_one, in_dims=(None, 0))(selected, chunk)) # (N,r)
         raw = vmap(spatial_one, in_dims=(None, 0))(selected, chunk)  # (N,r,d)
         spatial_chunks.append(raw.transpose(1, 2))
     return torch.cat(feature_chunks), torch.cat(spatial_chunks)
