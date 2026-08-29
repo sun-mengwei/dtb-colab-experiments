@@ -263,8 +263,14 @@ def run_single_mode_configuration(
     config: SingleModeConfig,
     *,
     device: torch.device | str = "cpu",
+    evaluation_points: dict[str, Tensor] | None = None,
 ) -> dict[str, object]:
-    """Run one configuration and return accuracy, conditioning, and basis drift."""
+    """Run one configuration and return accuracy, conditioning, and basis drift.
+
+    When ``evaluation_points`` is supplied, predictions are retained at every
+    outer iteration. This supports controlled slice and plane comparisons
+    without rerunning nominally identical optimization configurations.
+    """
 
     torch.manual_seed(config.model_seed)
     model = MLP(
@@ -300,6 +306,18 @@ def run_single_mode_configuration(
     initial_features: Tensor | None = None
     initial_prediction: Tensor | None = None
     history: list[dict[str, float]] = []
+    prepared_evaluations = {
+        name: points.to(device=device, dtype=theta.dtype)
+        for name, points in (evaluation_points or {}).items()
+    }
+    evaluation_history = {
+        name: {
+            "points": points.detach().cpu(),
+            "reference": single_mode_exact(points).detach().cpu(),
+            "predictions": [],
+        }
+        for name, points in prepared_evaluations.items()
+    }
 
     for outer_step in range(config.outer_steps + 1):
         solution, stiffness, load = solve_tangent_ritz(
@@ -321,6 +339,10 @@ def run_single_mode_configuration(
         )
         probe_features, _ = selected_tangent_basis(trial, theta, probe, indices)
         probe_prediction = predict_tangent(trial, theta, direction, probe)
+        for name, points in prepared_evaluations.items():
+            evaluation_history[name]["predictions"].append(
+                predict_tangent(trial, theta, direction, points).detach().cpu()
+            )
         if initial_features is None:
             initial_features = probe_features.detach()
             initial_prediction = probe_prediction.detach()
@@ -423,6 +445,7 @@ def run_single_mode_configuration(
         "history": history,
         "layer_counts": selection_counts(indices, spec),
         "selected_indices": indices.detach().cpu().tolist(),
+        "evaluations": evaluation_history,
     }
 
 
@@ -430,10 +453,18 @@ def run_configuration_sweep(
     configurations: Iterable[SingleModeConfig],
     *,
     device: torch.device | str = "cpu",
+    evaluation_points: dict[str, Tensor] | None = None,
 ) -> list[dict[str, object]]:
     """Run configurations sequentially and return their result dictionaries."""
 
-    return [run_single_mode_configuration(config, device=device) for config in configurations]
+    return [
+        run_single_mode_configuration(
+            config,
+            device=device,
+            evaluation_points=evaluation_points,
+        )
+        for config in configurations
+    ]
 
 
 def print_compact_summary(result: dict[str, object]) -> None:
