@@ -14,7 +14,7 @@ https://github.com/sun-mengwei/dtb-colab-experiments
 Choose branch `codex/game-dynamics-dtb`, then open the controlled notebook:
 
 ```text
-dtb_game_dynamics_unnormalized/notebooks/controlled_game_experiments_colab.ipynb
+DTB_Game_Ver1/notebooks/controlled_game_experiments_colab.ipynb
 ```
 
 Select **Runtime → Change runtime type → T4 GPU** when available.
@@ -37,7 +37,7 @@ subprocess.run(
     check=True,
 )
 
-%cd /content/dtb-colab-experiments/dtb_game_dynamics_unnormalized
+%cd /content/dtb-colab-experiments/DTB_Game_Ver1
 ```
 
 ## 3. Read the algorithm and target together
@@ -337,7 +337,7 @@ drive.mount("/content/drive")
 ```python
 %cd /content/dtb-colab-experiments
 !git pull origin codex/game-dynamics-dtb
-%cd /content/dtb-colab-experiments/dtb_game_dynamics_unnormalized
+%cd /content/dtb-colab-experiments/DTB_Game_Ver1
 ```
 
 After the branch is merged, replace the branch name with `main`.

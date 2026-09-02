@@ -101,7 +101,7 @@ values `x_i^k=X_k(z_i)`.
 The new package adapts the original DTB flat-parameter representation,
 selected-coordinate Jacobian construction, and truncated-SVD pattern. It also
 reuses the original repository's Cournot drift. Existing DTB files remain
-unchanged; all additions live under `dtb_game_dynamics_unnormalized/`.
+unchanged; all additions live under `DTB_Game_Ver1/`.
 
 ## Validation
 
