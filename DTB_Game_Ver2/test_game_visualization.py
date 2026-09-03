@@ -2,7 +2,6 @@
 
 import tempfile
 import unittest
-from itertools import combinations
 from pathlib import Path
 
 import matplotlib
@@ -38,9 +37,9 @@ class GameVisualizationTests(unittest.TestCase):
     def test_eight_dimensions_show_three_reproducible_pairs_and_projection_multiplicity(self):
         dim = 8
         references = [np.zeros(dim), np.full(dim, 13 / 98)]
-        for first, second in combinations(range(dim), 2):
-            point = np.zeros(dim)
-            point[[first, second]] = .5
+        for zero_player in range(dim):
+            point = np.full(dim, 11 / 72)
+            point[zero_player] = 0
             references.append(point)
         figure = plot_coordinate_snapshots(
             np.zeros((2, 3, dim)), [0, 1], [0, 1], equilibria=np.asarray(references),
@@ -56,9 +55,9 @@ class GameVisualizationTests(unittest.TestCase):
         self.assertEqual(displayed, repeated_display)
         self.assertEqual(len(set(displayed)), 3)
         self.assertEqual(sorted(text.get_text() for text in figure.axes[1].texts),
-                         ["16×", "6×", "6×"])
+                         ["6×"])
         self.assertEqual([text.get_text() for text in figure.legends[0].texts],
-                         ["30 reference equilibria $\\to$ 5 projected locations"])
+                         ["10 reference equilibria $\\to$ 5 projected locations"])
 
     def test_metrics_use_recorded_values_and_distinguish_last_solve_time(self):
         states = [dict(time=t, game_drift_rms=.125, median_known_distance=.25,
