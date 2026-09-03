@@ -84,12 +84,14 @@ def sample_initial(n: int, dim: int, low: float, high: float,
 class ResidualMLPMap(nn.Module):
     """Vector-valued pushforward map T_theta(z) = z + net_theta(z).
 
-    The last layer is initialized to zero, so T_theta starts exactly as the
-    identity map.  That makes lambda itself the initial strategy density.
+    By default the last layer is initialized to zero, so T_theta starts
+    exactly as the identity map. Set zero_init_output=False to retain the
+    standard MLP initialization when net is used as a tangent field.
     """
 
     def __init__(self, dim: int = 2, width: int = 64, depth: int = 3,
-                 activation: str = "tanh", dtype=torch.float32):
+                 activation: str = "tanh", dtype=torch.float32, *,
+                 zero_init_output: bool = True):
         super().__init__()
         if depth < 1:
             raise ValueError("depth must be >= 1")
@@ -110,7 +112,7 @@ class ResidualMLPMap(nn.Module):
         self.net = nn.Sequential(*layers)
 
         last = self.net[-1]
-        if isinstance(last, nn.Linear):
+        if zero_init_output and isinstance(last, nn.Linear):
             nn.init.zeros_(last.weight)
             nn.init.zeros_(last.bias)
 
