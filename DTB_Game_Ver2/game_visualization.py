@@ -11,7 +11,9 @@ Example (dimension is inferred for 3D, 5D, 6D, or 10D games)::
         projection_diagnostics=result["projections"],
     )
 
-The default coordinate planes are (x1, x2) and, when available, (x3, x4).
+Up to five dimensions, the defaults are (x1, x2) and, when available,
+(x3, x4). Above five dimensions, three coordinate pairs are sampled
+reproducibly from all possible pairs.
 Diagnostics are plotted for the projection error and coefficient norm; all metrics
 are rendered as Markdown math tables and saved to dtb_metrics.md.
 Trajectory values and the recorded diagnostics are read without modification.
@@ -19,6 +21,7 @@ Trajectory values and the recorded diagnostics are read without modification.
 
 from __future__ import annotations
 
+from itertools import combinations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -63,19 +66,30 @@ def _limits(values):
     return low - padding, high + padding
 
 
-def plot_coordinate_snapshots(trajectory, times, snapshot_steps, *,
-                              coordinate_pairs=None, equilibria=None,
-                              trail_particles=6, trail_steps=10):
-    """Rows are coordinate planes; columns are times. Axis limits are fixed per row."""
-    data = _trajectory(trajectory)
-    dim = data.shape[-1]
+def _coordinate_pairs(dim, coordinate_pairs, seed):
     if coordinate_pairs is None:
-        coordinate_pairs = [(i, i + 1) for i in (1, 3) if i + 1 <= dim]
+        if dim > 5:
+            candidates = list(combinations(range(1, dim + 1), 2))
+            rng = np.random.default_rng(seed)
+            chosen = np.sort(rng.choice(len(candidates), size=3, replace=False))
+            coordinate_pairs = [candidates[index] for index in chosen]
+        else:
+            coordinate_pairs = [(i, i + 1) for i in (1, 3) if i + 1 <= dim]
     pairs = [tuple(pair) for pair in coordinate_pairs]
     if not pairs or any(len(pair) != 2 or pair[0] == pair[1]
                         or any(not isinstance(i, (int, np.integer)) or not 1 <= i <= dim
                                for i in pair) for pair in pairs):
         raise ValueError("coordinate_pairs must contain distinct, valid ONE-BASED player indices")
+    return [(int(first), int(second)) for first, second in pairs]
+
+
+def plot_coordinate_snapshots(trajectory, times, snapshot_steps, *,
+                              coordinate_pairs=None, equilibria=None,
+                              coordinate_seed=0, trail_particles=6, trail_steps=10):
+    """Rows are coordinate planes; columns are times. Axis limits are fixed per row."""
+    data = _trajectory(trajectory)
+    dim = data.shape[-1]
+    pairs = _coordinate_pairs(dim, coordinate_pairs, coordinate_seed)
     known = _references(equilibria, dim)
     fig, axes = plt.subplots(len(pairs), len(snapshot_steps), squeeze=False,
                              figsize=(3.0 * len(snapshot_steps), 3.1 * len(pairs)),
@@ -86,7 +100,9 @@ def plot_coordinate_snapshots(trajectory, times, snapshot_steps, *,
         a, b = first - 1, second - 1
         xlim = _limits(np.concatenate((data[:, :, a].ravel(), known[:, a])))
         ylim = _limits(np.concatenate((data[:, :, b].ravel(), known[:, b])))
-        projected_known = np.unique(known[:, [a, b]], axis=0)
+        projected_known, projected_counts = np.unique(
+            known[:, [a, b]], axis=0, return_counts=True
+        )
         for column, step in enumerate(snapshot_steps):
             axis = axes[row, column]
             axis.scatter(data[step, :, a], data[step, :, b], s=5, alpha=.38,
@@ -97,13 +113,22 @@ def plot_coordinate_snapshots(trajectory, times, snapshot_steps, *,
             if len(known):
                 axis.scatter(projected_known[:, 0], projected_known[:, 1], s=24,
                              marker="D", color="#d43e38", edgecolors="white", linewidths=.4,
-                             label="Known equilibria", zorder=4)
+                             label=(f"{len(known)} reference equilibria $\\to$ "
+                                    f"{len(projected_known)} projected locations"), zorder=4)
+                if column == len(snapshot_steps) - 1:
+                    for point, count in zip(projected_known, projected_counts):
+                        if count > 1:
+                            axis.annotate(f"{count}×", point, xytext=(4, 4),
+                                          textcoords="offset points", color="#922b27",
+                                          fontsize=7, fontweight="bold", zorder=5)
             axis.set(xlim=xlim, ylim=ylim, xlabel=f"$x_{{{first}}}$", ylabel=f"$x_{{{second}}}$",
                      title=f"$t = {times[step]:.3g}$")
             axis.set_aspect("equal", adjustable="box")
             axis.grid(alpha=.25)
     if len(known):
-        axes[0, -1].legend(fontsize=7, loc="upper right")
+        handles, labels = axes[0, -1].get_legend_handles_labels()
+        fig.legend(handles, labels, fontsize=7, loc="upper right",
+                   bbox_to_anchor=(.995, .995))
     fig.suptitle("Coordinate snapshots · same axes across time · short trails track fixed particles")
     return fig
 
@@ -225,7 +250,8 @@ def plot_projection_metrics(projections):
 def save_game_visualizations(trajectory, *, h=1.0, times=None, output_dir=None,
                              coordinate_pairs=None, snapshot_steps=None,
                              equilibria=None, state_diagnostics=None,
-                             projection_diagnostics=None, save_files=True, show=True):
+                             projection_diagnostics=None, coordinate_seed=0,
+                             save_files=True, show=True):
     """Save coordinate snapshots, projection diagnostics, and mathematical metric tables.
 
     `times` supplies nonuniform timestamps; otherwise use `h` between states.
@@ -247,8 +273,9 @@ def save_game_visualizations(trajectory, *, h=1.0, times=None, output_dir=None,
         raise ValueError("provide both state_diagnostics and projection_diagnostics, or neither")
     metrics = (None if state_diagnostics is None
                else format_dtb_metrics(state_diagnostics, projection_diagnostics))
-    figure = plot_coordinate_snapshots(data, times, steps, coordinate_pairs=coordinate_pairs,
-                                       equilibria=known)
+    pairs = _coordinate_pairs(data.shape[-1], coordinate_pairs, coordinate_seed)
+    figure = plot_coordinate_snapshots(data, times, steps, coordinate_pairs=pairs,
+                                       equilibria=known, coordinate_seed=coordinate_seed)
     if save_files and output_dir is None:
         raise ValueError("output_dir is required when save_files=True")
     folder = Path(output_dir) if save_files else None
@@ -281,4 +308,5 @@ def save_game_visualizations(trajectory, *, h=1.0, times=None, output_dir=None,
             from IPython.display import Markdown, display
             display(Markdown(metrics))
 
-    return {"paths": paths, "snapshot_steps": steps, "metrics_markdown": metrics}
+    return {"paths": paths, "snapshot_steps": steps, "coordinate_pairs": pairs,
+            "metrics_markdown": metrics}

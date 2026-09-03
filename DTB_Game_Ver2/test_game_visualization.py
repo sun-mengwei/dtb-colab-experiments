@@ -2,6 +2,7 @@
 
 import tempfile
 import unittest
+from itertools import combinations
 from pathlib import Path
 
 import matplotlib
@@ -33,6 +34,31 @@ class GameVisualizationTests(unittest.TestCase):
         self.assertEqual(fig.axes[2].get_xlabel(), "$x_{3}$")
         with self.assertRaises(ValueError):
             plot_coordinate_snapshots(data, [0, .1, .2], [0, 2], coordinate_pairs=[(1, 6)])
+
+    def test_eight_dimensions_show_three_reproducible_pairs_and_projection_multiplicity(self):
+        dim = 8
+        references = [np.zeros(dim), np.full(dim, 13 / 98)]
+        for first, second in combinations(range(dim), 2):
+            point = np.zeros(dim)
+            point[[first, second]] = .5
+            references.append(point)
+        figure = plot_coordinate_snapshots(
+            np.zeros((2, 3, dim)), [0, 1], [0, 1], equilibria=np.asarray(references),
+            coordinate_seed=2026)
+        repeated = plot_coordinate_snapshots(
+            np.zeros((2, 3, dim)), [0, 1], [0, 1], equilibria=np.asarray(references),
+            coordinate_seed=2026)
+        self.assertEqual(len(figure.axes), 6)
+        displayed = [(figure.axes[index].get_xlabel(), figure.axes[index].get_ylabel())
+                     for index in (0, 2, 4)]
+        repeated_display = [(repeated.axes[index].get_xlabel(), repeated.axes[index].get_ylabel())
+                            for index in (0, 2, 4)]
+        self.assertEqual(displayed, repeated_display)
+        self.assertEqual(len(set(displayed)), 3)
+        self.assertEqual(sorted(text.get_text() for text in figure.axes[1].texts),
+                         ["16×", "6×", "6×"])
+        self.assertEqual([text.get_text() for text in figure.legends[0].texts],
+                         ["30 reference equilibria $\\to$ 5 projected locations"])
 
     def test_metrics_use_recorded_values_and_distinguish_last_solve_time(self):
         states = [dict(time=t, game_drift_rms=.125, median_known_distance=.25,
@@ -79,6 +105,7 @@ class GameVisualizationTests(unittest.TestCase):
                     output = save_game_visualizations(
                         data, h=.2, equilibria=equilibria, output_dir=folder, show=False)
                     self.assertEqual(set(output["paths"]), {"coordinate_snapshots"})
+                    self.assertEqual(len(output["coordinate_pairs"]), 3 if dim > 5 else dim // 2)
                     self.assertEqual([p.name for p in folder.iterdir()], ["coordinate_snapshots.png"])
                     self.assertGreater(output["paths"]["coordinate_snapshots"].stat().st_size, 0)
                     np.testing.assert_array_equal(data, original)
