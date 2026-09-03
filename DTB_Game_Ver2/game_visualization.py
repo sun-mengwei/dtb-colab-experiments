@@ -1,4 +1,4 @@
-"""Coordinate-plane snapshots and mathematical DTB metric tables.
+"""Coordinate snapshots, tangent-projection plots, and mathematical metric tables.
 
 Accepts NumPy arrays or PyTorch tensors shaped (time, particle, coordinate).
 Coordinate pairs use ONE-BASED player numbers, e.g. [(1, 2), (3, 4)].
@@ -12,7 +12,8 @@ Example (dimension is inferred for 3D, 5D, 6D, or 10D games)::
     )
 
 The default coordinate planes are (x1, x2) and, when available, (x3, x4).
-Diagnostics are rendered as Markdown math tables and saved to dtb_metrics.md.
+Diagnostics are plotted for the projection error and coefficient norm; all metrics
+are rendered as Markdown math tables and saved to dtb_metrics.md.
 Trajectory values and the recorded diagnostics are read without modification.
 """
 
@@ -167,10 +168,12 @@ def format_dtb_metrics(states, projections):
         ("update_seconds", "Map update time (seconds)",
          r"\Delta\tau_k^X=\tau_{k,\mathrm{end}}-\tau_{k,\mathrm{update}}"),
     ]
-    notation = r"""For $N$ particles in $d$ dimensions, let $x_{k,j}=X_k(z_j)$ and
-$J_{k,j}=\partial_\theta f_{\theta_0}(x_{k,j})$. Stack the particle velocities as
+    notation = r"""For $N$ particles in $d$ dimensions and an $m$-vector selected tangent basis,
+let $x_{k,j}=X_k(z_j)$ and $J_{k,j}^{S}=\partial_{\theta_S}f_{\theta_0}(x_{k,j})$.
+Stack the particle velocities as
 $\mathbf{g}_k=\operatorname{col}_{j=1}^{N}b(x_{k,j})$ and
-$\mathbf{u}_k=\operatorname{col}_{j=1}^{N}(J_{k,j}\alpha_k)$.
+$\mathbf{u}_k=\operatorname{col}_{j=1}^{N}(J_{k,j}^{S}\alpha_k)$, where
+$\alpha_k\in\mathbb{R}^{m}$.
 Distances use every coordinate and the supplied reference set $\mathcal{E}$:
 
 $$d_{k,j}=\min_{e\in\mathcal{E}}\lVert x_{k,j}-e\rVert_2.$$
@@ -188,11 +191,42 @@ end of the map update. Full time histories remain in the diagnostic CSV files.
             + "\n\n" + notes)
 
 
+def plot_projection_metrics(projections):
+    r"""Plot the two diagnostics that directly describe the tangent projection."""
+    if len(projections) == 0:
+        raise ValueError("projection diagnostics must be nonempty")
+    times = np.asarray([row["time"] for row in projections], dtype=float)
+    residuals = np.asarray([row["projection_residual"] for row in projections], dtype=float)
+    alpha_norms = np.asarray([row["alpha_norm"] for row in projections], dtype=float)
+    if (not np.isfinite(times).all() or not np.isfinite(residuals).all()
+            or not np.isfinite(alpha_norms).all() or np.any(np.diff(times) <= 0)
+            or np.any(residuals < 0) or np.any(alpha_norms < 0)):
+        raise ValueError("projection times and metrics must be finite, ordered, and nonnegative")
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.8), constrained_layout=True)
+    markevery = max(1, len(times) // 10)
+    axes[0].plot(times, residuals, color="#2374ab", linewidth=1.8,
+                 marker="o", markersize=3, markevery=markevery)
+    axes[0].set(title=("Relative projection error\n"
+                       r"$r_k=\Vert\mathbf{u}_k-\mathbf{g}_k\Vert_2/"
+                       r"\max(\Vert\mathbf{g}_k\Vert_2,10^{-30})$"),
+                xlabel=r"Solve time $t_k$", ylabel=r"$r_k$")
+    axes[1].plot(times, alpha_norms, color="#d87520", linewidth=1.8,
+                 marker="o", markersize=3, markevery=markevery)
+    axes[1].set(title="Selected tangent coefficient norm\n"
+                     r"$a_k=\Vert\alpha_k\Vert_2$",
+                xlabel=r"Solve time $t_k$", ylabel=r"$\Vert\alpha_k\Vert_2$")
+    for axis in axes:
+        axis.grid(alpha=.25)
+    fig.suptitle("Tangent-projection diagnostics")
+    return fig
+
+
 def save_game_visualizations(trajectory, *, h=1.0, times=None, output_dir,
                              coordinate_pairs=None, snapshot_steps=None,
                              equilibria=None, state_diagnostics=None,
                              projection_diagnostics=None, show=True):
-    """Save coordinate snapshots and optionally display/save mathematical metric tables.
+    """Save coordinate snapshots, projection diagnostics, and mathematical metric tables.
 
     `times` supplies nonuniform timestamps; otherwise use `h` between states.
     `show=False` saves files without displaying a figure or importing IPython.
@@ -225,6 +259,14 @@ def save_game_visualizations(trajectory, *, h=1.0, times=None, output_dir,
         plt.close(figure)
 
     if metrics is not None:
+        figure = plot_projection_metrics(projection_diagnostics)
+        paths["projection_metrics"] = folder / "projection_metrics.png"
+        try:
+            figure.savefig(paths["projection_metrics"], dpi=160, bbox_inches="tight")
+            if show:
+                plt.show()
+        finally:
+            plt.close(figure)
         paths["dtb_metrics"] = folder / "dtb_metrics.md"
         paths["dtb_metrics"].write_text(metrics, encoding="utf-8")
         if show:

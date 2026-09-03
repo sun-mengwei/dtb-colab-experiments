@@ -12,6 +12,7 @@ import numpy as np
 from game_visualization import (
     format_dtb_metrics,
     plot_coordinate_snapshots,
+    plot_projection_metrics,
     save_game_visualizations,
 )
 
@@ -46,13 +47,19 @@ class GameVisualizationTests(unittest.TestCase):
         self.assertIn(r"v_k^b=\frac{\lVert\mathbf{g}_k\rVert_2}{\sqrt{N}}", text)
         self.assertIn(r"1.250\times 10^{-1}", text)
         self.assertIn(r"-2.000\times 10^{-3}", text)
+        figure = plot_projection_metrics(projections)
+        np.testing.assert_allclose(figure.axes[0].lines[0].get_ydata(), [.075, .075])
+        np.testing.assert_allclose(figure.axes[1].lines[0].get_ydata(), [2, 2])
+        self.assertEqual(figure.axes[0].get_ylabel(), "$r_k$")
+        self.assertEqual(figure.axes[1].get_ylabel(), r"$\Vert\alpha_k\Vert_2$")
         with tempfile.TemporaryDirectory() as directory:
             result = save_game_visualizations(
                 np.zeros((2, 4, 3)), output_dir=directory, show=False,
                 state_diagnostics=states, projection_diagnostics=projections)
             self.assertEqual(result["paths"]["dtb_metrics"].read_text(), text)
             self.assertEqual({p.name for p in Path(directory).iterdir()},
-                             {"coordinate_snapshots.png", "dtb_metrics.md"})
+                             {"coordinate_snapshots.png", "projection_metrics.png",
+                              "dtb_metrics.md"})
 
     def test_only_coordinate_figures_for_multiple_game_dimensions(self):
         with tempfile.TemporaryDirectory() as directory:
