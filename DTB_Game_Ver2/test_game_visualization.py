@@ -60,6 +60,13 @@ class GameVisualizationTests(unittest.TestCase):
             self.assertEqual({p.name for p in Path(directory).iterdir()},
                              {"coordinate_snapshots.png", "projection_metrics.png",
                               "dtb_metrics.md"})
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "must-not-be-created"
+            result = save_game_visualizations(
+                np.zeros((2, 4, 3)), output_dir=missing, save_files=False, show=False,
+                state_diagnostics=states, projection_diagnostics=projections)
+            self.assertEqual(result["paths"], {})
+            self.assertFalse(missing.exists())
 
     def test_only_coordinate_figures_for_multiple_game_dimensions(self):
         with tempfile.TemporaryDirectory() as directory:
