@@ -1,32 +1,26 @@
-"""Reusable coordinate, state-distribution, and equilibrium plots for game trajectories.
+"""Coordinate-plane snapshots and mathematical DTB metric tables.
 
 Accepts NumPy arrays or PyTorch tensors shaped (time, particle, coordinate).
-No PCA, trajectory updates, or game-specific velocity functions are applied.
 Coordinate pairs use ONE-BASED player numbers, e.g. [(1, 2), (3, 4)].
 
-Example (the dimension is inferred, including for 3D, 5D, 6D, or 10D games)::
+Example (dimension is inferred for 3D, 5D, 6D, or 10D games)::
 
     plots = save_game_visualizations(
-        trajectory, h=H, equilibria=known_equilibria,
-        equilibrium_names=known_names, output_dir="figures",
-        equilibrium_radius=0.05,
+        trajectory, h=H, equilibria=known_equilibria, output_dir="figures",
+        state_diagnostics=result["states"],
+        projection_diagnostics=result["projections"],
     )
 
 The default coordinate planes are (x1, x2) and, when available, (x3, x4).
-Pass coordinate_pairs to select other planes. All coordinates are retained in
-the state heatmaps and equilibrium distances. Occupancy measures proximity to
-the supplied reference points, not proof of convergence or basin membership.
-For constrained games, pass feasible_mask with shape (time, particle).
+Diagnostics are rendered as Markdown math tables and saved to dtb_metrics.md.
+Trajectory values and the recorded diagnostics are read without modification.
 """
 
 from __future__ import annotations
 
-import csv
-from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from matplotlib.colors import Normalize
 import numpy as np
 
 
@@ -45,15 +39,11 @@ def _trajectory(value):
     return data
 
 
-def _references(equilibria, dim, names=None):
+def _references(equilibria, dim):
     points = np.empty((0, dim)) if equilibria is None else _numpy(equilibria)
     if points.ndim != 2 or points.shape[1] != dim or not np.isfinite(points).all():
         raise ValueError("equilibria must have finite shape (number_of_equilibria, dimension)")
-    labels = ([f"equilibrium {i + 1}" for i in range(len(points))]
-              if names is None else list(names))
-    if len(labels) != len(points):
-        raise ValueError("equilibrium_names must match the number of equilibria")
-    return points, labels
+    return points
 
 
 def _snapshot_indices(count, snapshot_steps):
@@ -72,74 +62,6 @@ def _limits(values):
     return low - padding, high + padding
 
 
-@dataclass
-class EquilibriumOccupancy:
-    """Mutually exclusive assignments; -1 and the final count column mean unassigned."""
-
-    names: list[str]
-    assignments: np.ndarray
-    nearest_distance: np.ndarray
-    counts: np.ndarray
-    fractions: np.ndarray
-    pair_fractions: np.ndarray
-    families: dict[str, np.ndarray]
-
-
-def compute_equilibrium_occupancy(trajectory, equilibria, *, names=None,
-                                  radius=0.05, feasible_mask=None):
-    """Assign to the nearest reference ONLY within a full-dimensional Euclidean radius.
-
-    Ties select the first reference. An optional feasibility mask rejects
-    inadmissible particles without changing their coordinates. Fractions use
-    all particles as the denominator, including unassigned particles.
-    Two-coordinate support references are grouped by their nonzero indices;
-    multiple references with the same support are aggregated in the pair map.
-    """
-    data = _trajectory(trajectory)
-    nt, nparticles, dim = data.shape
-    points, labels = _references(equilibria, dim, names)
-    if not np.isfinite(radius) or radius <= 0:
-        raise ValueError("radius must be positive and finite")
-    feasible = (np.ones((nt, nparticles), dtype=bool) if feasible_mask is None
-                else _numpy(feasible_mask))
-    if feasible.shape != (nt, nparticles) or feasible.dtype != np.bool_:
-        raise ValueError("feasible_mask must be Boolean with shape (time, particles)")
-    assignments = np.full((nt, nparticles), -1, dtype=int)
-    distances = np.full((nt, nparticles), np.inf)
-    counts = np.zeros((nt, len(points) + 1), dtype=int)
-    # Evaluate one time slice at a time to avoid a (time, particle, equilibrium, dim) array.
-    for step, current in enumerate(data):
-        if len(points):
-            squared = np.sum((current[:, None, :].astype(float)
-                              - points[None, :, :]) ** 2, axis=-1)
-            closest = squared.argmin(axis=1)
-            distances[step] = np.sqrt(squared[np.arange(nparticles), closest])
-            accepted = (distances[step] <= radius) & feasible[step]
-            assignments[step, accepted] = closest[accepted]
-        categories = np.where(assignments[step] < 0, len(points), assignments[step])
-        counts[step] = np.bincount(categories, minlength=len(points) + 1)
-    fractions = counts / nparticles
-    pair_fractions = np.zeros((nt, dim, dim))
-    families = {}
-    for index, point in enumerate(points):
-        support = np.flatnonzero(np.abs(point) > 1e-8)
-        if len(support) == 2:
-            first, second = support
-            pair_fractions[:, first, second] += fractions[:, index]
-            family = "Two-coordinate support"
-        elif len(support) == 0:
-            family = "Origin"
-        elif np.allclose(point, point[0], atol=1e-8, rtol=0):
-            family = "Equal-coordinate equilibria"
-        else:
-            family = "Other equilibria"
-        families.setdefault(family, np.zeros(nt))
-        families[family] += fractions[:, index]
-    families["Unassigned"] = fractions[:, -1]
-    return EquilibriumOccupancy(labels, assignments, distances, counts,
-                                fractions, pair_fractions, families)
-
-
 def plot_coordinate_snapshots(trajectory, times, snapshot_steps, *,
                               coordinate_pairs=None, equilibria=None,
                               trail_particles=6, trail_steps=10):
@@ -153,7 +75,7 @@ def plot_coordinate_snapshots(trajectory, times, snapshot_steps, *,
                         or any(not isinstance(i, (int, np.integer)) or not 1 <= i <= dim
                                for i in pair) for pair in pairs):
         raise ValueError("coordinate_pairs must contain distinct, valid ONE-BASED player indices")
-    known, _ = _references(equilibria, dim)
+    known = _references(equilibria, dim)
     fig, axes = plt.subplots(len(pairs), len(snapshot_steps), squeeze=False,
                              figsize=(3.0 * len(snapshot_steps), 3.1 * len(pairs)),
                              constrained_layout=True)
@@ -176,7 +98,7 @@ def plot_coordinate_snapshots(trajectory, times, snapshot_steps, *,
                              marker="D", color="#d43e38", edgecolors="white", linewidths=.4,
                              label="Known equilibria", zorder=4)
             axis.set(xlim=xlim, ylim=ylim, xlabel=f"$x_{{{first}}}$", ylabel=f"$x_{{{second}}}$",
-                     title=f"t = {times[step]:.3g}")
+                     title=f"$t = {times[step]:.3g}$")
             axis.set_aspect("equal", adjustable="box")
             axis.grid(alpha=.25)
     if len(known):
@@ -185,129 +107,96 @@ def plot_coordinate_snapshots(trajectory, times, snapshot_steps, *,
     return fig
 
 
-def _particle_order(final_points, max_particles):
-    """A deterministic nearest-neighbor walk groups similar final states for display."""
-    if max_particles < 1:
-        raise ValueError("max_heatmap_particles must be positive")
-    ids = np.unique(np.linspace(0, len(final_points) - 1,
-                               min(max_particles, len(final_points)), dtype=int))
-    points = final_points[ids].astype(float)
-    available = np.ones(len(ids), dtype=bool)
-    current = int(np.lexsort(points.T[::-1])[0])
-    order = []
-    for _ in range(len(ids)):
-        order.append(ids[current])
-        available[current] = False
-        distance = np.sum((points - points[current]) ** 2, axis=1)
-        distance[~available] = np.inf
-        current = int(distance.argmin())
-    return np.asarray(order)
+def _math_number(value):
+    value = float(value)
+    if np.isnan(value):
+        return r"\mathrm{NaN}"
+    if np.isinf(value):
+        return r"\infty" if value > 0 else r"-\infty"
+    if value == 0:
+        return "0"
+    mantissa, exponent = f"{value:.3e}".split("e")
+    return rf"{mantissa}\times 10^{{{int(exponent)}}}"
 
 
-def plot_state_heatmaps(trajectory, times, snapshot_steps, *, max_particles=512):
-    """Rows are fixed particles, columns are all players; share ordering and color scale."""
-    data = _trajectory(trajectory)
-    order = _particle_order(data[-1], max_particles)
-    dim = data.shape[-1]
-    if data.min() < 0:
-        scale = max(float(np.abs(data).max()), 1e-12)
-        norm, cmap = Normalize(-scale, scale), "RdBu_r"
-    else:
-        norm, cmap = Normalize(0, max(float(data.max()), 1e-12)), "viridis"
-    fig, axes = plt.subplots(1, len(snapshot_steps), squeeze=False,
-                             figsize=(3.0 * len(snapshot_steps), 5), constrained_layout=True)
-    for axis, step in zip(axes.flat, snapshot_steps):
-        image = axis.imshow(data[step, order], aspect="auto", interpolation="nearest",
-                            cmap=cmap, norm=norm)
-        axis.set(title=f"t = {times[step]:.3g}", xlabel="Player", ylabel="Particle (fixed order)")
-        axis.set_xticks(np.arange(dim), np.arange(1, dim + 1), fontsize=8)
-        ticks = np.unique(np.linspace(0, len(order) - 1, min(5, len(order)), dtype=int))
-        axis.set_yticks(ticks, order[ticks] + 1)
-    fig.colorbar(image, ax=axes.ravel().tolist(), label="Player quantity", shrink=.85)
-    fig.suptitle(f"All-player states · {len(order)} of {data.shape[1]} particles · ordered once by final-state similarity")
-    return fig, order
+def format_dtb_metrics(states, projections):
+    r"""Format recorded diagnostics as Markdown with LaTeX formulas and values.
 
+    State records cover k=0,...,K; projection records cover k=0,...,K-1.
+    Each table uses its own recorded timestamps, including the last solve at
+    T-h. Values are taken directly from the records, without recomputation.
+    """
+    if len(states) == 0 or len(projections) == 0:
+        raise ValueError("state and projection diagnostics must both be nonempty")
 
-def plot_pair_occupancy(occupancy, times, snapshot_steps, *, radius):
-    """Upper-triangular maps aggregate references with exactly two nonzero coordinates."""
-    values = occupancy.pair_fractions
-    dim = values.shape[-1]
-    maximum = float(values.max()) or 1.0
-    fig, axes = plt.subplots(1, len(snapshot_steps), squeeze=False,
-                             figsize=(3.1 * len(snapshot_steps), 3.8), constrained_layout=True)
-    mask = np.tril(np.ones((dim, dim), dtype=bool))
-    cmap = plt.get_cmap("YlGnBu").with_extremes(bad="#eeeeee")
-    for axis, step in zip(axes.flat, snapshot_steps):
-        image = axis.imshow(np.ma.array(values[step], mask=mask), vmin=0, vmax=maximum,
-                            cmap=cmap, interpolation="nearest")
-        axis.set(title=f"t = {times[step]:.3g}", xlabel="Second support player", ylabel="First support player")
-        axis.set_xticks(np.arange(dim), np.arange(1, dim + 1), fontsize=8)
-        axis.set_yticks(np.arange(dim), np.arange(1, dim + 1), fontsize=8)
-    fig.colorbar(image, ax=axes.ravel().tolist(), label="Fraction of all particles", shrink=.85)
-    fig.suptitle(f"Pair-equilibrium neighborhoods · full-state distance ≤ {radius:g} · fixed color scale")
-    return fig
+    def table(rows, records):
+        first, last = records[0], records[-1]
+        lines = [
+            f"| Metric | Mathematical definition | First: $t={first['time']:.4g}$ "
+            f"| Last: $t={last['time']:.4g}$ |",
+            "| :--- | :--- | ---: | ---: |",
+        ]
+        for key, label, formula in rows:
+            lines.append(f"| {label} | ${formula}$ | ${_math_number(first[key])}$ "
+                         f"| ${_math_number(last[key])}$ |")
+        return "\n".join(lines)
 
+    state_rows = [
+        ("game_drift_rms", "Game velocity (RMS)",
+         r"v_k^b=\frac{\lVert\mathbf{g}_k\rVert_2}{\sqrt{N}}"),
+        ("median_known_distance", "Median equilibrium distance",
+         r"d_k^{50}=\operatorname{median}_{j}\,d_{k,j}"),
+        ("p90_known_distance", "90th percentile equilibrium distance",
+         r"d_k^{90}=Q_{0.9}(\{d_{k,j}\}_{j=1}^{N})"),
+        ("minimum_coordinate", "Minimum coordinate",
+         r"x_k^{\min}=\min_{j,i}x_{k,j,i}"),
+        ("negative_coordinate_fraction", "Fraction of negative coordinates",
+         r"f_k^-=\frac{1}{Nd}\sum_{j=1}^{N}\sum_{i=1}^{d}\mathbf{1}_{\{x_{k,j,i}<0\}}"),
+    ]
+    projection_rows = [
+        ("projection_residual", "Relative projection residual",
+         r"r_k=\frac{\lVert\mathbf{u}_k-\mathbf{g}_k\rVert_2}"
+         r"{\max(\lVert\mathbf{g}_k\rVert_2,10^{-30})}"),
+        ("projected_drift_rms", "Tangent velocity (RMS)",
+         r"v_k^u=\frac{\lVert\mathbf{u}_k\rVert_2}{\sqrt{N}}"),
+        ("alpha_norm", "Tangent coefficient norm", r"a_k=\lVert\alpha_k\rVert_2"),
+        ("basis_seconds", "Jacobian time (seconds)",
+         r"\Delta\tau_k^J=\tau_{k,\mathrm{solve}}-\tau_{k,\mathrm{basis}}"),
+        ("solve_seconds", "SVD solve time (seconds)",
+         r"\Delta\tau_k^{\mathrm{solve}}=\tau_{k,\mathrm{update}}-\tau_{k,\mathrm{solve}}"),
+        ("update_seconds", "Map update time (seconds)",
+         r"\Delta\tau_k^X=\tau_{k,\mathrm{end}}-\tau_{k,\mathrm{update}}"),
+    ]
+    notation = r"""For $N$ particles in $d$ dimensions, let $x_{k,j}=X_k(z_j)$ and
+$J_{k,j}=\partial_\theta f_{\theta_0}(x_{k,j})$. Stack the particle velocities as
+$\mathbf{g}_k=\operatorname{col}_{j=1}^{N}b(x_{k,j})$ and
+$\mathbf{u}_k=\operatorname{col}_{j=1}^{N}(J_{k,j}\alpha_k)$.
+Distances use every coordinate and the supplied reference set $\mathcal{E}$:
 
-def plot_occupancy_over_time(occupancy, times, *, radius):
-    """Keep unassigned mass visible; never force every particle into an equilibrium."""
-    fig, axis = plt.subplots(figsize=(10, 4.2), constrained_layout=True)
-    palette = {"Two-coordinate support": "#208c9b", "Origin": "#6f66ad",
-               "Equal-coordinate equilibria": "#eeb54b", "Other equilibria": "#d97d58",
-               "Unassigned": "#d8dde2"}
-    labels = list(occupancy.families)
-    if len(times) == 1:
-        bottom = 0.0
-        for name, fractions in occupancy.families.items():
-            axis.bar(times[0], fractions[0], bottom=bottom, color=palette[name], label=name)
-            bottom += fractions[0]
-    else:
-        axis.stackplot(times, *occupancy.families.values(), labels=labels,
-                       colors=[palette[name] for name in labels], alpha=.95)
-    axis.set(xlabel="Time", ylabel="Fraction of all particles", ylim=(0, 1),
-             title=f"Equilibrium neighborhood occupancy · full-state radius {radius:g}")
-    axis.legend(loc="upper center", bbox_to_anchor=(.5, -.16), ncol=min(3, len(labels)), fontsize=8)
-    axis.grid(axis="y", alpha=.2)
-    return fig
+$$d_{k,j}=\min_{e\in\mathcal{E}}\lVert x_{k,j}-e\rVert_2.$$
 
-
-def plot_dtb_diagnostics(states, projections):
-    """Use the existing DTB diagnostics without importing or rerunning the solver."""
-    state_times = [row["time"] for row in states]
-    step_times = [row["time"] for row in projections]
-    fig, axes = plt.subplots(2, 3, figsize=(15, 8), constrained_layout=True)
-    axes[0, 0].semilogy(step_times, [max(row["projection_residual"], 1e-15) for row in projections])
-    axes[0, 0].set_title("Tangent projection residual")
-    axes[0, 1].semilogy(state_times, [max(row["game_drift_rms"], 1e-15) for row in states], label="Game velocity")
-    axes[0, 1].semilogy(step_times, [max(row["projected_drift_rms"], 1e-15) for row in projections], label="Tangent velocity")
-    axes[0, 1].set_title("RMS velocity"); axes[0, 1].legend()
-    for key, label in [("median_known_distance", "Median"), ("p90_known_distance", "90th percentile")]:
-        axes[0, 2].semilogy(state_times, [max(row[key], 1e-15) for row in states], label=label)
-    axes[0, 2].set_title("Distance to known equilibrium subset"); axes[0, 2].legend()
-    axes[1, 0].plot(state_times, [row["negative_coordinate_fraction"] for row in states])
-    axes[1, 0].set_title("Fraction of negative coordinates")
-    axes[1, 1].plot(step_times, [row["alpha_norm"] for row in projections])
-    axes[1, 1].set_title("Tangent coefficient norm")
-    for key, label in [("basis_seconds", "Jacobian"), ("solve_seconds", "SVD solve"), ("update_seconds", "Map update")]:
-        axes[1, 2].plot(step_times, [row[key] for row in projections], label=label)
-    axes[1, 2].set_title("Seconds per step"); axes[1, 2].legend()
-    for axis in axes.flat:
-        axis.set_xlabel("Time"); axis.grid(alpha=.25)
-    return fig
+**State metrics**
+"""
+    notes = r"""The median follows `torch.median` (the lower middle value for even $N$);
+$Q_{0.9}$ uses linear interpolation. Projection values describe the solve at
+its input time $t_k$, so the last solve is at $T-h$, while the last state is at $T$.
+The wall-clock timestamps $\tau$ mark the start of each named operation and the
+end of the map update. Full time histories remain in the diagnostic CSV files.
+"""
+    return (notation + "\n" + table(state_rows, states)
+            + "\n\n**Projection metrics**\n\n" + table(projection_rows, projections)
+            + "\n\n" + notes)
 
 
 def save_game_visualizations(trajectory, *, h=1.0, times=None, output_dir,
                              coordinate_pairs=None, snapshot_steps=None,
-                             equilibria=None, equilibrium_names=None,
-                             equilibrium_radius=0.05, feasible_mask=None,
-                             max_heatmap_particles=512, state_diagnostics=None,
+                             equilibria=None, state_diagnostics=None,
                              projection_diagnostics=None, show=True):
-    """Save the coordinate atlas, heatmaps, occupancy figures/data, and optional DTB diagnostics.
+    """Save coordinate snapshots and optionally display/save mathematical metric tables.
 
-    `times` can supply nonuniform timestamps; otherwise use `h` between states.
-    The heatmap includes all particles up to max_heatmap_particles, then a
-    deterministic evenly spaced subset. Its particle IDs are saved in NPZ.
-    Returned metadata permits checking/reusing assignments without reading plots.
-    No trajectory values are changed. All files are written under output_dir.
+    `times` supplies nonuniform timestamps; otherwise use `h` between states.
+    `show=False` saves files without displaying a figure or importing IPython.
+    The returned paths list the artifacts generated by this call.
     """
     data = _trajectory(trajectory)
     if times is None:
@@ -318,54 +207,28 @@ def save_game_visualizations(trajectory, *, h=1.0, times=None, output_dir,
     if times.shape != (len(data),) or not np.isfinite(times).all() or np.any(np.diff(times) <= 0):
         raise ValueError("times must match the trajectory and be strictly increasing")
     steps = _snapshot_indices(len(data), snapshot_steps)
-    known, names = _references(equilibria, data.shape[-1], equilibrium_names)
-    occupancy = compute_equilibrium_occupancy(data, known, names=names,
-                                              radius=equilibrium_radius, feasible_mask=feasible_mask)
+    known = _references(equilibria, data.shape[-1])
     if (state_diagnostics is None) != (projection_diagnostics is None):
         raise ValueError("provide both state_diagnostics and projection_diagnostics, or neither")
+    metrics = (None if state_diagnostics is None
+               else format_dtb_metrics(state_diagnostics, projection_diagnostics))
+    figure = plot_coordinate_snapshots(data, times, steps, coordinate_pairs=coordinate_pairs,
+                                       equilibria=known)
     folder = Path(output_dir)
     folder.mkdir(parents=True, exist_ok=True)
-    paths = {}
-
-    def save(figure, name):
-        path = folder / f"{name}.png"
-        figure.savefig(path, dpi=160, bbox_inches="tight")
-        paths[name] = path
+    paths = {"coordinate_snapshots": folder / "coordinate_snapshots.png"}
+    try:
+        figure.savefig(paths["coordinate_snapshots"], dpi=160, bbox_inches="tight")
         if show:
             plt.show()
+    finally:
         plt.close(figure)
 
-    if data.shape[-1] >= 2:
-        save(plot_coordinate_snapshots(data, times, steps, coordinate_pairs=coordinate_pairs,
-                                        equilibria=known), "coordinate_snapshots")
-    heatmap, order = plot_state_heatmaps(data, times, steps, max_particles=max_heatmap_particles)
-    save(heatmap, "state_heatmaps")
-    if len(known):
-        if np.any(np.count_nonzero(np.abs(known) > 1e-8, axis=1) == 2):
-            save(plot_pair_occupancy(occupancy, times, steps, radius=equilibrium_radius),
-                 "equilibrium_pair_occupancy")
-        save(plot_occupancy_over_time(occupancy, times, radius=equilibrium_radius),
-             "equilibrium_occupancy_over_time")
-    if state_diagnostics is not None:
-        save(plot_dtb_diagnostics(state_diagnostics, projection_diagnostics), "dtb_diagnostics")
+    if metrics is not None:
+        paths["dtb_metrics"] = folder / "dtb_metrics.md"
+        paths["dtb_metrics"].write_text(metrics, encoding="utf-8")
+        if show:
+            from IPython.display import Markdown, display
+            display(Markdown(metrics))
 
-    csv_path = folder / "equilibrium_occupancy.csv"
-    with csv_path.open("w", newline="") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["time", "equilibrium_index", "equilibrium", "particles", "fraction", "radius"])
-        for step, timestamp in enumerate(times):
-            for index, name in enumerate(names + ["Unassigned"]):
-                writer.writerow([timestamp, index if index < len(names) else -1, name,
-                                 occupancy.counts[step, index], occupancy.fractions[step, index],
-                                 equilibrium_radius])
-    paths["equilibrium_occupancy_csv"] = csv_path
-    data_path = folder / "visualization_data.npz"
-    np.savez_compressed(data_path, times=times, snapshot_steps=steps, heatmap_particle_ids=order,
-                        equilibrium_assignments=occupancy.assignments,
-                        nearest_equilibrium_distance=occupancy.nearest_distance,
-                        equilibrium_counts=occupancy.counts, equilibrium_fractions=occupancy.fractions,
-                        equilibrium_names=np.asarray(names + ["Unassigned"], dtype=str),
-                        equilibrium_radius=equilibrium_radius, pair_fractions=occupancy.pair_fractions)
-    paths["visualization_data"] = data_path
-    return {"paths": paths, "occupancy": occupancy, "heatmap_particle_ids": order,
-            "snapshot_steps": steps}
+    return {"paths": paths, "snapshot_steps": steps, "metrics_markdown": metrics}
