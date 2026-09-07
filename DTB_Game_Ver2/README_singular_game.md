@@ -18,9 +18,14 @@ is used directly, and steps approaching the diagonal are stopped.
 
 The only displayed diagnostics are:
 
-- Six density heatmaps with shared bins, axes, and color scale.
+- Six snapshots with a faint density heatmap and points colored by their initial
+  coordinate gap `|x1(0)-x2(0)|`. Each particle keeps its color across time,
+  with one shared colorbar (purple = smaller gap, yellow = larger gap).
 - RMS projection error versus time.
 - The coefficient norm `||alpha(t)||_2` versus time.
+
+For this drift, `dr/dt=-1/r`: larger positive gaps close more slowly. The fixed
+point colors make that initial-gap dependence visible in the snapshots.
 
 The saved notebook includes the default run's outputs. Checks for the drift,
 normalized solve, actual map update, and rejected steps can be run with:
