@@ -10,15 +10,15 @@ import torch
 
 
 def definitions():
-    path = Path(__file__).with_name('singular_game_2d_parameter_evolving_dtb.ipynb')
+    path = Path(__file__).with_name('singular_game_2d.ipynb')
     notebook = json.loads(path.read_text())
     namespace = {'__name__': 'singular_game_notebook'}
     previous = Path.cwd()
     try:
         os.chdir(path.parent)
         for cell in notebook['cells']:
-            if cell['id'] in {'setup', 'drift', 'dtb_loop'}:
-                source = ''.join(cell['source']).split('\nresult = run_dtb()')[0]
+            if cell['id'] in {'setup', 'drift', 'dtb_loop', 'euler_loop', 'plots'}:
+                source = ''.join(cell['source']).split('\n# Run')[0]
                 exec(compile(source, f'{path.name}:{cell["id"]}', 'exec'), namespace)
     finally:
         os.chdir(previous)
@@ -119,14 +119,93 @@ class SingularGameTests(unittest.TestCase):
         self.assertEqual(result['snapshot_times'][-1], .0025)
         self.assertEqual(len(result['alpha']), 3)
         self.assertTrue(np.all(np.diff(result['snapshot_times']) > 0))
-        for t in (.5, float('nan')):
+        for t in (0., float('nan')):
             with self.assertRaises(ValueError):
                 self.n['run_dtb'](t_final=t)
-        notebook = json.loads(Path(__file__).with_name('singular_game_2d_parameter_evolving_dtb.ipynb').read_text())
+        notebook = json.loads(Path(__file__).with_name('singular_game_2d.ipynb').read_text())
         source = '\n'.join(''.join(c['source']) for c in notebook['cells'])
-        for removed in ('direct_euler', 'exact_singular_flow', 'RUN_FULL_STUDY',
+        for removed in ('exact_singular_flow', 'RUN_FULL_STUDY',
                         'RUN_REGULARIZED', 'SAVE_RUN', 'proposed_theta', 'ridge_solve'):
             self.assertNotIn(removed, source)
+
+    def test_euler_is_independent_and_matches_direct_recurrence(self):
+        with patch.dict(self.n, {'ResidualMLPMap': lambda *a, **k: self.fail('Euler constructed a network')}):
+            result = self.n['run_euler'](n_snapshot=32, h=.001, t_final=.002)
+        initial = result['snapshot_labels']
+        first = initial+.001*self.n['dynamic_drift'](initial)
+        second = first+.001*self.n['dynamic_drift'](first)
+        torch.testing.assert_close(result['snapshots'][1], first)
+        torch.testing.assert_close(result['snapshots'][-1], second)
+        # Euler preserves 2*x2-x1 for this drift; this independent identity checks signs.
+        invariant = lambda q: 2*q[..., 1]-q[..., 0]
+        torch.testing.assert_close(invariant(result['snapshots']), invariant(initial).expand(3, -1))
+        dtb = self.n['run_dtb'](n=16, n_snapshot=32, h=.001, t_final=.002)
+        torch.testing.assert_close(dtb['snapshot_labels'], result['snapshot_labels'], rtol=0, atol=0)
+        np.testing.assert_array_equal(dtb['snapshot_times'], result['snapshot_times'])
+
+    def test_euler_rejects_invalid_proposal_and_keeps_last_valid_state(self):
+        def bad_drift(x):
+            out = torch.zeros_like(x)
+            out[:, 0] = -1e8
+            return out
+        with patch.dict(self.n, {'dynamic_drift': bad_drift}):
+            result = self.n['run_euler'](n_snapshot=16, t_final=.003)
+        self.assertIn('rejected', result['status'])
+        self.assertEqual(result['snapshot_times'].tolist(), [0.0])
+        self.assertEqual(len(result['requested_snapshot_times']), 4)
+        torch.testing.assert_close(result['snapshots'][0], result['snapshot_labels'])
+
+    def test_aligned_plots_share_times_axes_colors_and_mark_missing_states(self):
+        euler = self.n['run_euler'](n_snapshot=16, t_final=.003)
+        partial = {**euler, 'snapshots': euler['snapshots'][:1],
+                   'snapshot_times': euler['snapshot_times'][:1], 'status': 'stopped'}
+        figure = self.n['plot_aligned_snapshots'](partial, euler)
+        axes = figure.axes[:-1]  # Shared colorbar is last.
+        self.assertEqual(len(axes), 8)
+        for ax in axes:
+            np.testing.assert_allclose(ax.get_xlim(), axes[0].get_xlim())
+            np.testing.assert_allclose(ax.get_ylim(), axes[0].get_ylim())
+        for column in range(4):
+            self.assertEqual(axes[column].get_title(), axes[column+4].get_title())
+        for ax in axes[1:4]:
+            self.assertIn('Unavailable', ax.texts[0].get_text())
+            self.assertEqual(len(ax.collections), 0)
+        colors = axes[0].collections[-1].get_array()
+        for ax in axes[4:]:
+            np.testing.assert_array_equal(ax.collections[-1].get_array(), colors)
+            self.assertIs(ax.collections[-1].norm, axes[0].collections[-1].norm)
+        self.n['plt'].close(figure)
+
+    def test_switches_allow_euler_only_dtb_only_and_neither_without_stale_results(self):
+        path = Path(__file__).with_name('singular_game_2d.ipynb')
+        notebook = json.loads(path.read_text())
+        for do_dtb, do_euler in ((False, True), (True, False), (False, False)):
+            namespace = {'__name__': 'singular_switch_test'}
+            previous = Path.cwd()
+            try:
+                os.chdir(path.parent)
+                for cell in notebook['cells']:
+                    if cell['cell_type'] != 'code':
+                        continue
+                    source = ''.join(cell['source'])
+                    if cell['id'] == 'setup':
+                        source = source.replace('RUN_DTB = True', f'RUN_DTB = {do_dtb}')
+                        source = source.replace('RUN_EULER = True', f'RUN_EULER = {do_euler}')
+                    exec(compile(source, f'{path.name}:{cell["id"]}', 'exec'), namespace)
+                    if cell['id'] == 'setup':
+                        namespace.update(N=16, N_SNAPSHOT=24, T=.002)
+                        if not do_dtb:
+                            self.assertNotIn('game_dtb_basis_matrices', namespace)
+                self.assertEqual(namespace['dtb_result'] is not None, do_dtb)
+                self.assertEqual(namespace['euler_result'] is not None, do_euler)
+                self.assertEqual(namespace['fig_diagnostics'] is not None, do_dtb)
+                if do_dtb or do_euler:
+                    self.assertEqual(len(namespace['fig_snapshots'].axes), 4)  # Three times + colorbar.
+                else:
+                    self.assertIsNone(namespace['fig_snapshots'])
+            finally:
+                namespace.get('plt', self.n['plt']).close('all')
+                os.chdir(previous)
 
 
 if __name__ == '__main__':
