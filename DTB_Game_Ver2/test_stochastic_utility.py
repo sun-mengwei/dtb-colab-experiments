@@ -9,12 +9,14 @@ import torch.nn as nn
 
 matplotlib.use("Agg")
 
-from dtb import flat_params
+from dtb import flat_params, solution_map
 from utility import (
     create_run_directory,
     diagnostics_markdown,
     euler_score_update,
+    map_tangent_spatial_terms,
     plot_dtb_em_snapshots,
+    plot_dtb_snapshots,
     plot_tangent_diagnostics,
     sample_initial_with_score,
     tangent_velocity_spatial_terms,
@@ -22,6 +24,64 @@ from utility import (
 
 
 class StochasticUtilityTests(unittest.TestCase):
+    def test_solution_map_and_physical_derivatives_for_nonlinear_mixed_coordinates(self):
+        # Conjugate independent quadratic maps by a nonorthogonal matrix.
+        # This tests both nonlinear deformation derivatives and matrix orientation.
+        mixing = torch.tensor([[1.0, 0.3], [-0.2, 1.1]], dtype=torch.float64)
+        inverse = torch.linalg.inv(mixing)
+
+        class MixedQuadratic(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Parameter(torch.zeros(2, dtype=torch.float64))
+
+            def forward(self, z):
+                w = z @ inverse.T
+                return (self.a * w.square()) @ mixing.T
+
+        model = MixedQuadratic()
+        initial, structure, _ = flat_params(model)
+        selected = torch.arange(2)
+        theta = torch.tensor([0.2, -0.1], dtype=torch.float64)
+        alpha = torch.tensor([0.7, -0.3], dtype=torch.float64)
+        labels = torch.tensor([[0.1, 0.3], [0.4, 0.7], [0.6, 0.2]], dtype=torch.float64)
+        w = labels @ inverse.T
+        factors = 1 + 2 * theta * w
+        expected_jacobian = mixing @ torch.diag_embed(2 * alpha * w / factors) @ inverse
+
+        torch.testing.assert_close(
+            solution_map(initial, labels, model, structure, theta_initial=initial),
+            labels, atol=0, rtol=0,
+        )
+        torch.testing.assert_close(
+            solution_map(theta, labels, model, structure, theta_initial=initial),
+            labels + (theta * w.square()) @ mixing.T,
+        )
+        torch.testing.assert_close(flat_params(model)[0], initial, atol=0, rtol=0)
+        actual = map_tangent_spatial_terms(
+            theta, selected, alpha, labels, model, structure,
+            theta_initial=initial, chunk_size=2,
+        )
+        expected = (
+            (alpha * w.square()) @ mixing.T,
+            expected_jacobian,
+            (2 * alpha * w / factors).sum(-1),
+            (2 * alpha / factors**3) @ inverse,
+        )
+        for value, target in zip(actual, expected):
+            torch.testing.assert_close(value, target, atol=1e-12, rtol=1e-12)
+
+        # At T_initial = identity, the original physical-field helper agrees.
+        initial_terms = map_tangent_spatial_terms(
+            initial, selected, alpha, labels, model, structure,
+            theta_initial=initial, chunk_size=2,
+        )
+        direct_terms = tangent_velocity_spatial_terms(
+            initial, selected, alpha, labels, model, structure, chunk_size=2,
+        )
+        for value, target in zip(initial_terms, direct_terms):
+            torch.testing.assert_close(value, target, atol=1e-12, rtol=1e-12)
+
     def test_gaussian_initial_score_is_exact(self):
         generator = torch.Generator().manual_seed(7)
         x, score, log_density = sample_initial_with_score(
@@ -109,8 +169,19 @@ class StochasticUtilityTests(unittest.TestCase):
                 output_path=folder / "diagnostics.png",
             )
             self.assertIn((1, 2), figures)
+            self.assertEqual(len(figures[(1, 2)].axes), 4)
             self.assertTrue((folder / "dtb_vs_em_x1_x2.png").exists())
             self.assertTrue((folder / "diagnostics.png").exists())
+            dtb_figures = plot_dtb_snapshots(
+                dtb, np.array([0.0, 0.5, 1.0]), [0, 2],
+                coordinate_pairs=[(1, 2)], output_dir=folder,
+            )
+            axes = dtb_figures[(1, 2)].axes
+            self.assertEqual(len(axes), 2)
+            np.testing.assert_array_equal(axes[0].collections[0].get_offsets(), dtb[0, :, :2])
+            np.testing.assert_array_equal(axes[1].collections[0].get_offsets(), dtb[2, :, :2])
+            self.assertEqual(axes[0].get_xlim(), axes[1].get_xlim())
+            self.assertTrue((folder / "dtb_x1_x2.png").exists())
         table = diagnostics_markdown(records)
         self.assertIn("Relative projection error", table)
         self.assertIn(r"\|\alpha_k\|_2", table)

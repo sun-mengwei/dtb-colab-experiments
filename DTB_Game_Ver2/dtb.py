@@ -96,6 +96,22 @@ def u_at(theta_flat: torch.Tensor, x: torch.Tensor, model: nn.Module,
     return functional_call(model, full, (x,))
 
 
+def solution_map(theta_flat: torch.Tensor, z: torch.Tensor, model: nn.Module,
+                 structure, *, theta_initial: torch.Tensor) -> torch.Tensor:
+    r"""Evaluate the anchored solution map ``T_theta(z) = z + f_theta(z) - f_initial(z)``.
+
+    ``model`` supplies a vector-valued network with the same output dimension
+    as ``z``. Keep ``theta_initial`` fixed throughout the run: the subtraction
+    makes the initial map exactly the identity without changing the random
+    network initialization or its parameter tangent directions. Parameters
+    are passed functionally; the live module is not modified.
+    """
+    return z + (
+        u_at(theta_flat, z, model, structure)
+        - u_at(theta_initial, z, model, structure)
+    )
+
+
 def _u_one(theta_flat: torch.Tensor, x_single: torch.Tensor,
            model: nn.Module, structure) -> torch.Tensor:
     return u_at(theta_flat, x_single.unsqueeze(0), model, structure).squeeze(0)
