@@ -1,0 +1,45 @@
+{
+  "source_notebook": "https://github.com/sun-mengwei/dtb-colab-experiments/blob/c84639cec27e21634880b3c1eae25a4aace84f1a/DTB_Game_Ver2/cournot_3d_nonpotential_stochastic_mlp_dtb.ipynb",
+  "source_notebook_sha256": "16153effd0189463c522779931f0c06a9ddaaad09bd451a75b8b125664e88ad5",
+  "run_name": "cournot_3d_stochastic_mlp-tanh_w32_d4_p3395_basis128_seed2026_20260909T005347Z",
+  "recovery_method": "Exact image/png bytes decoded from saved notebook cell outputs; images were not regenerated or rescaled.",
+  "original_runtime_files_retrieved": false,
+  "plots": [
+    {
+      "file": "dtb_3d_cloud_snapshots.png",
+      "cell_id": "cloud3d-figures",
+      "output_index": 5,
+      "width": 897,
+      "height": 1271,
+      "bytes": 370733,
+      "sha256": "c4a78a26ed613cf9e5a35ed007e1bd9691b60fa2ef0b0afdadfe0ac0df43af05"
+    },
+    {
+      "file": "em_3d_cloud_snapshots.png",
+      "cell_id": "cloud3d-figures",
+      "output_index": 6,
+      "width": 897,
+      "height": 1267,
+      "bytes": 284176,
+      "sha256": "5bf72ac68ddf804adf5084e42294a261ddc910e3a757125ea290db8bdb3b49c4"
+    },
+    {
+      "file": "dtb_vs_em_x1_x2.png",
+      "cell_id": "a19bf64c",
+      "output_index": 0,
+      "width": 1202,
+      "height": 656,
+      "bytes": 256116,
+      "sha256": "90d035af99e39ff96a1f05e925a8a2da5b2867ed6512b0b949216e13ca157d93"
+    },
+    {
+      "file": "tangent_diagnostics.png",
+      "cell_id": "a19bf64c",
+      "output_index": 1,
+      "width": 1111,
+      "height": 411,
+      "bytes": 55597,
+      "sha256": "55f832be1acfada7e86a930bd732e58f429f0490e233fb0056cea2a0cc27f47a"
+    }
+  ]
+}
