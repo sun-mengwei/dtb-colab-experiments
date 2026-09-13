@@ -10,6 +10,8 @@ __pycache__/
 DTB_rep/snapshots/
 DTB_rep/*.log
 nn_approx_ladder/runs/
+DTB_Ver3/results/*
+!DTB_Ver3/results/.gitkeep
 
 # Local archives and bulky reference material
 *.zip
