@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -54,20 +55,70 @@ def sample_initial_particles(
 ) -> torch.Tensor:
     """Draw reproducible CPU samples, then transfer the complete cloud."""
 
+    particles, _ = sample_initial_with_score(
+        count,
+        dim,
+        law=law,
+        smoothing_std=smoothing_std,
+        gaussian_mean=0.5,
+        gaussian_std=0.15,
+        dtype=dtype,
+        device=device,
+        generator=generator,
+    )
+    return particles
+
+
+def sample_initial_with_score(
+    count: int,
+    dim: int,
+    *,
+    law: str,
+    smoothing_std: float,
+    gaussian_mean: float,
+    gaussian_std: float,
+    dtype: torch.dtype,
+    device: torch.device,
+    generator: torch.Generator,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Sample an initial cloud and its analytical density score.
+
+    ``smoothed_uniform`` is ``U([0,1]^d) + N(0, smoothing_std^2 I)``.
+    Its score represents the softened boundary. ``uniform`` returns the
+    interior score zero; its distributional boundary score is not represented.
+    """
+
     if count < 1 or dim < 1:
         raise ValueError("count and dim must be positive")
-    if smoothing_std <= 0:
-        raise ValueError("smoothing_std must be positive")
-    if law not in {"uniform", "smoothed_uniform"}:
-        raise ValueError("law must be 'uniform' or 'smoothed_uniform'")
+    if smoothing_std <= 0 or gaussian_std <= 0:
+        raise ValueError("smoothing_std and gaussian_std must be positive")
+    if law not in {"gaussian", "uniform", "smoothed_uniform"}:
+        raise ValueError("law must be 'gaussian', 'uniform', or 'smoothed_uniform'")
+    if law == "gaussian":
+        noise = torch.randn((count, dim), dtype=dtype, generator=generator)
+        particles = gaussian_mean + gaussian_std * noise
+        score = -(particles - gaussian_mean) / gaussian_std**2
+        return particles.to(device), score.to(device)
+
     particles = torch.rand((count, dim), dtype=dtype, generator=generator)
-    if law == "smoothed_uniform":
-        particles += smoothing_std * torch.randn(
-            (count, dim),
-            dtype=dtype,
-            generator=generator,
-        )
-    return particles.to(device)
+    if law == "uniform":
+        return particles.to(device), torch.zeros_like(particles, device=device)
+
+    particles += smoothing_std * torch.randn(
+        (count, dim),
+        dtype=dtype,
+        generator=generator,
+    )
+    upper = particles / smoothing_std
+    lower = (particles - 1.0) / smoothing_std
+    density = (torch.special.ndtr(upper) - torch.special.ndtr(lower)).clamp_min(
+        torch.finfo(dtype).tiny
+    )
+    inv_sqrt_2pi = 1.0 / math.sqrt(2.0 * math.pi)
+    pdf_upper = inv_sqrt_2pi * torch.exp(-0.5 * upper.square())
+    pdf_lower = inv_sqrt_2pi * torch.exp(-0.5 * lower.square())
+    score = (pdf_upper - pdf_lower) / (smoothing_std * density)
+    return particles.to(device), score.to(device)
 
 
 def make_time_grid(final_time: float, step_size: float) -> np.ndarray:
@@ -209,6 +260,40 @@ def plot_diagnostics(
     axes[1].set(xlabel="Time", ylabel=r"$\kappa_2(J)$", title="Selected Jacobian condition")
     for axis in axes:
         axis.grid(alpha=0.2, which="both")
+    if output_path is not None:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=300, bbox_inches="tight")
+    return fig
+
+
+def plot_stochastic_diagnostics(
+    times,
+    score_rms,
+    diffusion_correction_rms,
+    *,
+    output_path: str | Path | None = None,
+) -> plt.Figure:
+    """Plot score magnitude and probability-flow diffusion correction."""
+
+    times = to_numpy(times)
+    score = to_numpy(score_rms)
+    correction = to_numpy(diffusion_correction_rms)
+    if score.shape != times.shape or correction.shape != times.shape:
+        raise ValueError("stochastic diagnostic arrays must have the time shape")
+    if not np.isfinite(score).all() or not np.isfinite(correction).all():
+        raise ValueError("stochastic diagnostics contain a nonfinite value")
+    fig, axes = plt.subplots(1, 2, figsize=(11, 3.8), layout="constrained")
+    axes[0].plot(times, score, color="#0f766e", linewidth=1.4)
+    axes[0].set(xlabel="Time", ylabel="Score RMS", title="Transported density score")
+    axes[1].plot(times, correction, color="#c2410c", linewidth=1.4)
+    axes[1].set(
+        xlabel="Time",
+        ylabel="Correction RMS",
+        title="Probability-flow diffusion correction",
+    )
+    for axis in axes:
+        axis.grid(alpha=0.2)
     if output_path is not None:
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)

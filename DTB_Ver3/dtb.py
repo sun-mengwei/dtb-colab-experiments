@@ -7,7 +7,7 @@ from typing import Sequence
 
 import torch
 import torch.nn as nn
-from torch.func import functional_call, jacrev, vmap
+from torch.func import functional_call, jacrev, jvp, vmap
 
 ParameterStructure = list[tuple[str, tuple[int, ...]]]
 
@@ -223,3 +223,103 @@ def dtb_step(
     if not torch.isfinite(next_particles).all() or not torch.isfinite(next_theta).all():
         raise FloatingPointError("DTB update produced a nonfinite value")
     return next_theta, next_particles, projection
+
+
+def tangent_spatial_terms(
+    theta: torch.Tensor,
+    selected: torch.Tensor,
+    alpha: torch.Tensor,
+    particles: torch.Tensor,
+    model: nn.Module,
+    structure: ParameterStructure,
+    *,
+    chunk_size: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    r"""Evaluate ``u``, ``D_x u``, ``div(u)``, and ``grad(div(u))``.
+
+    Here ``u(x) = partial_theta_selected f_theta(x) alpha``. The returned
+    spatial Jacobian follows ``grad_u[n,a,b] = partial u_a / partial x_b``.
+    These terms evolve the score of the density transported by the projected
+    DTB velocity.
+    """
+
+    if theta.ndim != 1 or selected.ndim != 1 or alpha.ndim != 1:
+        raise ValueError("theta, selected, and alpha must be one-dimensional")
+    if selected.numel() != alpha.numel():
+        raise ValueError("selected and alpha must have equal length")
+    if particles.ndim != 2 or particles.shape[0] < 1:
+        raise ValueError("particles must have nonempty shape (N, d)")
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be positive")
+
+    parameters = theta.detach().clone()
+    direction = torch.zeros_like(parameters).index_copy(0, selected, alpha.detach())
+
+    def tangent_one(particle: torch.Tensor) -> torch.Tensor:
+        def model_at(candidate: torch.Tensor) -> torch.Tensor:
+            return evaluate_model(
+                candidate,
+                particle.unsqueeze(0),
+                model,
+                structure,
+            ).squeeze(0)
+
+        return jvp(model_at, (parameters,), (direction,))[1]
+
+    spatial_jacobian_one = jacrev(tangent_one)
+
+    def divergence_one(particle: torch.Tensor) -> torch.Tensor:
+        return torch.trace(spatial_jacobian_one(particle))
+
+    gradient_divergence_one = jacrev(divergence_one)
+    velocity_batch = vmap(tangent_one)
+    jacobian_batch = vmap(spatial_jacobian_one)
+    divergence_batch = vmap(divergence_one)
+    gradient_divergence_batch = vmap(gradient_divergence_one)
+
+    velocities: list[torch.Tensor] = []
+    spatial_jacobians: list[torch.Tensor] = []
+    divergences: list[torch.Tensor] = []
+    gradient_divergences: list[torch.Tensor] = []
+    for start in range(0, particles.shape[0], chunk_size):
+        chunk = particles[start : start + chunk_size]
+        velocities.append(velocity_batch(chunk))
+        spatial_jacobians.append(jacobian_batch(chunk))
+        divergences.append(divergence_batch(chunk))
+        gradient_divergences.append(gradient_divergence_batch(chunk))
+    return (
+        torch.cat(velocities, dim=0),
+        torch.cat(spatial_jacobians, dim=0),
+        torch.cat(divergences, dim=0),
+        torch.cat(gradient_divergences, dim=0),
+    )
+
+
+def advance_score(
+    score: torch.Tensor,
+    spatial_jacobian: torch.Tensor,
+    gradient_divergence: torch.Tensor,
+    *,
+    step_size: float,
+) -> torch.Tensor:
+    r"""Euler-step the score transported by a velocity field.
+
+    With ``q = grad(log rho)`` and velocity ``u``, this computes
+
+    ``q_next = q - h ((D_x u)^T q + grad(div(u)))``.
+    """
+
+    if score.ndim != 2:
+        raise ValueError("score must have shape (N, d)")
+    expected = (score.shape[0], score.shape[1], score.shape[1])
+    if spatial_jacobian.shape != expected:
+        raise ValueError("score and spatial_jacobian shapes are inconsistent")
+    if gradient_divergence.shape != score.shape:
+        raise ValueError("gradient_divergence must have the score shape")
+    if step_size <= 0:
+        raise ValueError("step_size must be positive")
+    transported = torch.einsum("nab,na->nb", spatial_jacobian, score)
+    next_score = score - step_size * (transported + gradient_divergence)
+    if not torch.isfinite(next_score).all():
+        raise FloatingPointError("score update produced a nonfinite value")
+    return next_score.detach()

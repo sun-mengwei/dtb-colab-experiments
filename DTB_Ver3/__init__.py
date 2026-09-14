@@ -1,4 +1,4 @@
-"""Small experiment package for deterministic Deep Tangent Bundle games."""
+"""Small experiment package for deterministic and stochastic DTB games."""
 
 from .experiment import (
     DTBExperiment,
@@ -6,14 +6,25 @@ from .experiment import (
     ExperimentResult,
     run_experiment,
 )
-from .games import BlockCournotGame, CournotGame, FunctionalGame, Game
+from .games import (
+    BlockCournotGame,
+    ConstantDiffusion,
+    CournotGame,
+    Diffusion,
+    FunctionalDiffusion,
+    FunctionalGame,
+    Game,
+)
 
 __all__ = [
     "BlockCournotGame",
+    "ConstantDiffusion",
     "CournotGame",
     "DTBExperiment",
     "ExperimentConfig",
     "ExperimentResult",
+    "Diffusion",
+    "FunctionalDiffusion",
     "FunctionalGame",
     "Game",
     "run_experiment",
