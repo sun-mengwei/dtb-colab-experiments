@@ -4,7 +4,9 @@ from .experiment import (
     DTBExperiment,
     ExperimentConfig,
     ExperimentResult,
+    StepSizeSweepResult,
     run_experiment,
+    run_step_size_sweep,
 )
 from .games import (
     BlockCournotGame,
@@ -27,5 +29,7 @@ __all__ = [
     "FunctionalDiffusion",
     "FunctionalGame",
     "Game",
+    "StepSizeSweepResult",
     "run_experiment",
+    "run_step_size_sweep",
 ]

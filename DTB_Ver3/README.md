@@ -31,6 +31,24 @@ The reference is selected automatically: explicit Euler for deterministic
 dynamics and Euler--Maruyama for stochastic dynamics. Set
 `run_reference=False` to skip it.
 
+A matched step-size sweep is one call:
+
+```python
+from DTB_Ver3 import run_step_size_sweep
+
+sweep = run_step_size_sweep(
+    game,
+    step_sizes=(0.02, 0.01, 0.005, 0.0025),
+    base_config=config,
+    diffusion=diffusion,
+)
+```
+
+Each run resets the same seed. Deterministic sweeps compare paired particles;
+stochastic sweeps compare distributions with sliced 2-Wasserstein distance.
+The sweep saves `step_size_sweep.csv` and `step_size_sweep.json` alongside the
+individual run folders.
+
 `experiment.py` owns initialization, the fixed tangent-coordinate selection,
 the direct particle/parameter updates, score transport, progress reports,
 reference integration, and output serialization. `games.py` contains dynamics

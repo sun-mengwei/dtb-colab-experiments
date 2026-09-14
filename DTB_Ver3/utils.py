@@ -299,3 +299,78 @@ def plot_stochastic_diagnostics(
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path, dpi=300, bbox_inches="tight")
     return fig
+
+
+def sliced_wasserstein_distance(
+    first,
+    second,
+    *,
+    projections: int = 128,
+    seed: int = 0,
+) -> float:
+    """Return a reproducible sliced 2-Wasserstein point-cloud distance."""
+
+    first = to_numpy(first)
+    second = to_numpy(second)
+    if first.shape != second.shape or first.ndim != 2:
+        raise ValueError("point clouds must have the same (N, d) shape")
+    if projections < 1:
+        raise ValueError("projections must be positive")
+    generator = np.random.default_rng(seed)
+    directions = generator.normal(size=(projections, first.shape[1]))
+    directions /= np.linalg.norm(directions, axis=1, keepdims=True)
+    first_projection = np.sort(first @ directions.T, axis=0)
+    second_projection = np.sort(second @ directions.T, axis=0)
+    return float(
+        np.mean(np.sqrt(np.mean((first_projection - second_projection) ** 2, axis=0)))
+    )
+
+
+def plot_step_size_sweep(
+    records,
+    *,
+    metric_label: str,
+    output_path: str | Path | None = None,
+) -> plt.Figure:
+    """Plot the standard seven-column step-size sweep table."""
+
+    table = to_numpy(records)
+    if table.ndim != 2 or table.shape[1] != 7 or table.shape[0] < 1:
+        raise ValueError("records must have shape (step_sizes, 7)")
+    order = np.argsort(table[:, 0])
+    table = table[order]
+    step_sizes = table[:, 0]
+    fig, axes = plt.subplots(1, 2, figsize=(11, 3.8), layout="constrained")
+    axes[0].loglog(
+        step_sizes,
+        table[:, 2],
+        "o-",
+        label="DTB vs finest reference",
+    )
+    positive_reference = table[:, 3] > 0
+    if positive_reference.any():
+        axes[0].loglog(
+            step_sizes[positive_reference],
+            table[positive_reference, 3],
+            "s--",
+            label="reference vs finest reference",
+        )
+    axes[0].set(
+        xlabel="Step size",
+        ylabel=metric_label,
+        title="Final-cloud step-size comparison",
+    )
+    axes[0].legend()
+    axes[1].loglog(step_sizes, table[:, 5], "o-", color="#176b87")
+    axes[1].set(
+        xlabel="Step size",
+        ylabel="Final RMS projection residual",
+        title="Tangent projection error",
+    )
+    for axis in axes:
+        axis.grid(alpha=0.2, which="both")
+    if output_path is not None:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=300, bbox_inches="tight")
+    return fig

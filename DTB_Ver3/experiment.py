@@ -15,7 +15,7 @@ Euler--Maruyama reference, progress reports, and saved numerical results.
 from __future__ import annotations
 
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -30,6 +30,7 @@ from .utils import (
     resolve_device,
     resolve_dtype,
     sample_initial_with_score,
+    sliced_wasserstein_distance,
     snapshot_indices,
     to_numpy,
     warmup_cuda,
@@ -162,6 +163,22 @@ class ExperimentResult:
             "maximum_condition_number": float(np.max(self.jacobian_condition)),
             "output_dir": None if self.output_dir is None else str(self.output_dir),
         }
+
+
+@dataclass
+class StepSizeSweepResult:
+    """Runs and the standard numerical table from a step-size sweep."""
+
+    step_sizes: tuple[float, ...]
+    runs: dict[float, ExperimentResult]
+    records: np.ndarray
+    columns: tuple[str, ...]
+    metric_name: str
+    output_dir: Path
+
+    @property
+    def csv_path(self) -> Path:
+        return self.output_dir / "step_size_sweep.csv"
 
 
 class DTBExperiment:
@@ -419,6 +436,169 @@ def run_experiment(
     """Run one complete DTB/reference comparison."""
 
     return DTBExperiment(game, config, diffusion=diffusion, model=model).run()
+
+
+def run_step_size_sweep(
+    game: Game,
+    step_sizes,
+    base_config: ExperimentConfig | None = None,
+    *,
+    diffusion: Diffusion | None = None,
+    model: nn.Module | None = None,
+    output_dir: str | Path | None = None,
+    wasserstein_projections: int = 128,
+) -> StepSizeSweepResult:
+    """Run matched experiments while changing only the time-step size.
+
+    Every run resets the same seed, so the initial particles, MLP parameters,
+    and fixed tangent coordinates agree. Deterministic clouds use paired RMS;
+    stochastic clouds use sliced 2-Wasserstein distance because individual
+    Euler--Maruyama particles do not share a deterministic pairing with the
+    probability-flow particles.
+    """
+
+    config = base_config or ExperimentConfig()
+    config.validate()
+    if not config.run_reference:
+        raise ValueError("a step-size sweep requires run_reference=True")
+    values = tuple(float(value) for value in step_sizes)
+    if not values or any(value <= 0 for value in values):
+        raise ValueError("step_sizes must contain positive values")
+    if len(set(values)) != len(values):
+        raise ValueError("step_sizes must be unique")
+
+    root = _sweep_output_dir(game, config, output_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    runs: dict[float, ExperimentResult] = {}
+    for step_size in values:
+        tag = f"h_{step_size:.12g}".replace(".", "p").replace("-", "m")
+        run_config = replace(
+            config,
+            step_size=step_size,
+            output_dir=root / tag,
+        )
+        print(f"\nStep-size sweep: h={step_size:g}", flush=True)
+        runs[step_size] = run_experiment(
+            game,
+            run_config,
+            diffusion=diffusion,
+            model=model,
+        )
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    finest_step = min(values)
+    finest_reference = runs[finest_step].reference_final_particles
+    if finest_reference is None:
+        raise RuntimeError("the finest run did not produce a reference cloud")
+    metric_name = (
+        "sliced_wasserstein_2" if config.stochastic else "paired_particle_rms"
+    )
+    records: list[list[float]] = []
+    for step_size in values:
+        result = runs[step_size]
+        reference = result.reference_final_particles
+        if reference is None:
+            raise RuntimeError(f"run h={step_size:g} did not produce a reference cloud")
+        records.append(
+            [
+                step_size,
+                float(len(result.projection_times)),
+                _cloud_distance(
+                    result.dtb_final_particles,
+                    finest_reference,
+                    stochastic=config.stochastic,
+                    projections=wasserstein_projections,
+                    seed=config.seed,
+                ),
+                _cloud_distance(
+                    reference,
+                    finest_reference,
+                    stochastic=config.stochastic,
+                    projections=wasserstein_projections,
+                    seed=config.seed,
+                ),
+                _cloud_distance(
+                    result.dtb_final_particles,
+                    reference,
+                    stochastic=config.stochastic,
+                    projections=wasserstein_projections,
+                    seed=config.seed,
+                ),
+                float(result.projection_error[-1]),
+                result.elapsed_seconds,
+            ]
+        )
+    columns = (
+        "step_size",
+        "step_count",
+        "dtb_vs_finest_reference",
+        "reference_vs_finest_reference",
+        "dtb_vs_same_step_reference",
+        "final_projection_error",
+        "elapsed_seconds",
+    )
+    table = np.asarray(records, dtype=float)
+    np.savetxt(
+        root / "step_size_sweep.csv",
+        table,
+        delimiter=",",
+        header=",".join(columns),
+        comments="",
+    )
+    write_json(
+        root / "step_size_sweep.json",
+        {
+            "game": game.name,
+            "dynamics": config.dynamics,
+            "reference_method": _reference_method(config),
+            "step_sizes": list(values),
+            "finest_step": finest_step,
+            "cloud_metric": metric_name,
+            "columns": list(columns),
+        },
+    )
+    return StepSizeSweepResult(
+        step_sizes=values,
+        runs=runs,
+        records=table,
+        columns=columns,
+        metric_name=metric_name,
+        output_dir=root,
+    )
+
+
+def _sweep_output_dir(
+    game: Game,
+    config: ExperimentConfig,
+    requested: str | Path | None,
+) -> Path:
+    if requested is not None:
+        return Path(requested).expanduser().resolve()
+    name = f"{game.name}_{config.dynamics}_step_sweep"
+    if config.output_dir is not None:
+        return Path(config.output_dir).expanduser().resolve().parent / name
+    return Path(__file__).resolve().parent / "results" / name
+
+
+def _cloud_distance(
+    first: np.ndarray,
+    second: np.ndarray,
+    *,
+    stochastic: bool,
+    projections: int,
+    seed: int,
+) -> float:
+    if stochastic:
+        return sliced_wasserstein_distance(
+            first,
+            second,
+            projections=projections,
+            seed=seed,
+        )
+    if first.shape != second.shape:
+        raise ValueError("paired deterministic clouds must have equal shapes")
+    return float(np.sqrt(np.mean(np.sum((first - second) ** 2, axis=1))))
 
 
 def _probability_flow_correction(
