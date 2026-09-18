@@ -267,6 +267,88 @@ def plot_diagnostics(
     return fig
 
 
+def plot_configuration_diagnostics(
+    state_times,
+    trajectory_rms_error,
+    projection_times,
+    relative_projection_error,
+    alpha_norm,
+    condition_number,
+    *,
+    output_path: str | Path | None = None,
+) -> plt.Figure:
+    r"""Plot the main diagnostics for one experiment configuration.
+
+    The panels show paired trajectory RMS error, relative tangent-projection
+    error ``||J alpha - g||_2 / ||g||_2``, coefficient norm ``||alpha||_2``,
+    and the selected Jacobian condition number.
+    """
+
+    state_times = to_numpy(state_times).astype(float, copy=False)
+    trajectory = to_numpy(trajectory_rms_error).astype(float, copy=False)
+    projection_times = to_numpy(projection_times).astype(float, copy=False)
+    relative = to_numpy(relative_projection_error).astype(float, copy=False)
+    coefficients = to_numpy(alpha_norm).astype(float, copy=False)
+    condition = to_numpy(condition_number).astype(float, copy=False)
+    if state_times.ndim != 1 or trajectory.shape != state_times.shape:
+        raise ValueError("trajectory RMS error must have the state-time shape")
+    if projection_times.ndim != 1 or projection_times.size < 1:
+        raise ValueError("projection_times must be a nonempty vector")
+    if any(
+        values.shape != projection_times.shape
+        for values in (relative, coefficients, condition)
+    ):
+        raise ValueError("projection diagnostics must have the projection-time shape")
+    if not all(
+        np.isfinite(values).all()
+        for values in (
+            state_times,
+            trajectory,
+            projection_times,
+            relative,
+            coefficients,
+            condition,
+        )
+    ):
+        raise ValueError("configuration diagnostics contain a nonfinite value")
+    if (trajectory < 0).any() or (relative < 0).any() or (coefficients < 0).any():
+        raise ValueError("error and coefficient-norm diagnostics cannot be negative")
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7.2), layout="constrained")
+    axes[0, 0].plot(state_times, trajectory, color="#176b87", linewidth=1.4)
+    axes[0, 0].set(
+        xlabel="Time",
+        ylabel=r"$E_{\mathrm{traj}}$",
+        title="Trajectory RMS versus reference",
+    )
+    axes[0, 1].plot(projection_times, relative, color="#c2410c", linewidth=1.4)
+    axes[0, 1].set(
+        xlabel="Time",
+        ylabel=r"$\|J\alpha-g\|_2/\|g\|_2$",
+        title="Relative projection error",
+    )
+    axes[1, 0].plot(projection_times, coefficients, color="#0f766e", linewidth=1.4)
+    axes[1, 0].set(
+        xlabel="Time",
+        ylabel=r"$\|\alpha\|_2$",
+        title="Tangent coefficient norm",
+    )
+    axes[1, 1].plot(projection_times, condition, color="#7c3aed", linewidth=1.2)
+    axes[1, 1].set_yscale("log")
+    axes[1, 1].set(
+        xlabel="Time",
+        ylabel=r"$\kappa_2(J)$",
+        title="Selected Jacobian condition",
+    )
+    for axis in axes.ravel():
+        axis.grid(alpha=0.2, which="both")
+    if output_path is not None:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=300, bbox_inches="tight")
+    return fig
+
+
 def plot_stochastic_diagnostics(
     times,
     score_rms,
@@ -408,6 +490,46 @@ def plot_final_time_rms_sweep(
         xlabel="Step size $h$",
         ylabel="Final-time RMS error",
         title=fr"DTB versus reference at $T={final_time:g}$",
+    )
+    axis.grid(alpha=0.2, which="both")
+    if output_path is not None:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=300, bbox_inches="tight")
+    return fig
+
+
+def plot_relative_projection_sweep(
+    step_sizes,
+    relative_errors,
+    *,
+    output_path: str | Path | None = None,
+) -> plt.Figure:
+    r"""Plot last-step relative projection error against the step size.
+
+    Each value is ``||J_k alpha_k - g_k||_2 / ||g_k||_2`` at that run's last
+    projection time ``t_k = T - h``.
+    """
+
+    steps = to_numpy(step_sizes).astype(float, copy=False)
+    errors = to_numpy(relative_errors).astype(float, copy=False)
+    if steps.ndim != 1 or errors.shape != steps.shape or steps.size < 1:
+        raise ValueError("step_sizes and relative_errors must be nonempty vectors")
+    if not np.isfinite(steps).all() or not np.isfinite(errors).all():
+        raise ValueError("step sizes and relative projection errors must be finite")
+    if (steps <= 0).any() or (errors < 0).any():
+        raise ValueError("step sizes must be positive and relative errors nonnegative")
+
+    order = np.argsort(steps)
+    fig, axis = plt.subplots(figsize=(6.4, 4.2), layout="constrained")
+    if (errors > 0).all():
+        axis.loglog(steps[order], errors[order], "o-", color="#c2410c", linewidth=1.5)
+    else:
+        axis.semilogx(steps[order], errors[order], "o-", color="#c2410c", linewidth=1.5)
+    axis.set(
+        xlabel="Step size $h$",
+        ylabel="Last-step relative projection error",
+        title=r"$\|J_k\alpha_k-g_k\|_2/\|g_k\|_2$ versus step size",
     )
     axis.grid(alpha=0.2, which="both")
     if output_path is not None:

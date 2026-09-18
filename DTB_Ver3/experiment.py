@@ -124,6 +124,8 @@ class ExperimentResult:
     reference_snapshots: dict[float, np.ndarray]
     projection_error: np.ndarray
     relative_projection_error: np.ndarray
+    alpha_norm: np.ndarray
+    trajectory_rms_error: np.ndarray
     jacobian_sigma_max: np.ndarray
     jacobian_sigma_min: np.ndarray
     jacobian_condition: np.ndarray
@@ -166,6 +168,15 @@ class ExperimentResult:
             "final_mean_distance": self.final_mean_distance,
             "final_paired_rms": self.final_paired_rms,
             "final_projection_error": float(self.projection_error[-1]),
+            "final_relative_projection_error": float(
+                self.relative_projection_error[-1]
+            ),
+            "final_alpha_norm": float(self.alpha_norm[-1]),
+            "final_trajectory_rms_error": (
+                None
+                if self.trajectory_rms_error.size == 0
+                else float(self.trajectory_rms_error[-1])
+            ),
             "final_score_rms": (
                 None
                 if self.final_score is None
@@ -186,6 +197,7 @@ class StepSizeSweepResult:
     columns: tuple[str, ...]
     metric_name: str
     final_time_rms_error: np.ndarray
+    final_relative_projection_error: np.ndarray
     output_dir: Path
 
     @property
@@ -195,6 +207,10 @@ class StepSizeSweepResult:
     @property
     def final_time_rms_csv_path(self) -> Path:
         return self.output_dir / "final_time_rms_vs_step_size.csv"
+
+    @property
+    def relative_projection_csv_path(self) -> Path:
+        return self.output_dir / "relative_projection_error_vs_step_size.csv"
 
 
 class DTBExperiment:
@@ -265,6 +281,8 @@ class DTBExperiment:
         )
         projection_error: list[float] = []
         relative_projection_error: list[float] = []
+        alpha_norm: list[float] = []
+        trajectory_rms_error: list[float] = [0.0] if config.run_reference else []
         sigma_max: list[float] = []
         sigma_min: list[float] = []
         condition: list[float] = []
@@ -272,6 +290,15 @@ class DTBExperiment:
         score_rms: list[float] = []
         diffusion_rms: list[float] = []
         selected_history: list[np.ndarray] = []
+        reference_particles = initial.detach().clone() if config.run_reference else None
+        reference_snapshots = (
+            {float(times[0]): to_numpy(reference_particles).copy()}
+            if reference_particles is not None
+            else {}
+        )
+        reference_generator = torch.Generator().manual_seed(
+            config.seed + 2 if config.reference_seed is None else config.reference_seed
+        )
 
         total_steps = len(times) - 1
         report_steps = _progress_steps(total_steps, config.progress_reports)
@@ -357,8 +384,30 @@ class DTBExperiment:
                     step_size=step_size,
                 )
 
+            if reference_particles is not None:
+                reference_particles = _advance_reference(
+                    self.game,
+                    self.diffusion,
+                    config,
+                    reference_particles,
+                    current_time,
+                    step_size,
+                    reference_generator,
+                )
+                trajectory_rms_error.append(
+                    float(
+                        (particles - reference_particles)
+                        .square()
+                        .sum(dim=1)
+                        .mean()
+                        .sqrt()
+                        .item()
+                    )
+                )
+
             projection_error.append(float(projection.rms_residual.item()))
             relative_projection_error.append(float(projection.relative_residual.item()))
+            alpha_norm.append(float(torch.linalg.vector_norm(projection.alpha).item()))
             sample_scale = config.particle_count**0.5
             sigma_max.append(float(projection.singular_values[0].item()) * sample_scale)
             sigma_min.append(float(projection.singular_values[-1].item()) * sample_scale)
@@ -371,6 +420,8 @@ class DTBExperiment:
                 dtb_snapshots[snapshot_time] = to_numpy(particles).copy()
                 if score is not None:
                     score_snapshots[snapshot_time] = to_numpy(score).copy()
+                if reference_particles is not None:
+                    reference_snapshots[snapshot_time] = to_numpy(reference_particles).copy()
 
             while report_index < len(report_steps) and state_index >= report_steps[report_index]:
                 if device.type == "cuda":
@@ -390,13 +441,8 @@ class DTBExperiment:
 
         if device.type == "cuda":
             torch.cuda.synchronize()
-        reference_final, reference_snapshots = _run_reference(
-            self.game,
-            self.diffusion,
-            config,
-            initial,
-            times,
-            snapshots_by_index,
+        reference_final = (
+            None if reference_particles is None else reference_particles.detach()
         )
         final_mean_distance, final_paired_rms = _reference_distances(
             particles,
@@ -430,6 +476,8 @@ class DTBExperiment:
             reference_snapshots=reference_snapshots,
             projection_error=np.asarray(projection_error),
             relative_projection_error=np.asarray(relative_projection_error),
+            alpha_norm=np.asarray(alpha_norm),
+            trajectory_rms_error=np.asarray(trajectory_rms_error),
             jacobian_sigma_max=np.asarray(sigma_max),
             jacobian_sigma_min=np.asarray(sigma_min),
             jacobian_condition=np.asarray(condition),
@@ -617,6 +665,21 @@ def run_step_size_sweep(
         header="step_size,final_time_rms_error",
         comments="",
     )
+    final_relative_projection_error = np.asarray(
+        [runs[step_size].relative_projection_error[-1] for step_size in values],
+        dtype=float,
+    )
+    if not np.isfinite(final_relative_projection_error).all():
+        raise FloatingPointError(
+            "relative projection-error sweep contains a nonfinite value"
+        )
+    np.savetxt(
+        root / "relative_projection_error_vs_step_size.csv",
+        np.column_stack((values, final_relative_projection_error)),
+        delimiter=",",
+        header="step_size,last_step_relative_projection_error",
+        comments="",
+    )
     write_json(
         root / "step_size_sweep.json",
         {
@@ -632,6 +695,9 @@ def run_step_size_sweep(
             "final_time_rms_definition": (
                 "sqrt(mean_i(||X_DTB_i(T)-X_reference_i(T)||_2^2))"
             ),
+            "relative_projection_definition": (
+                "||J_k alpha_k-g_k||_2/||g_k||_2 at the last DTB step"
+            ),
             "columns": list(columns),
         },
     )
@@ -642,6 +708,7 @@ def run_step_size_sweep(
         columns=columns,
         metric_name=metric_name,
         final_time_rms_error=final_time_rms_error,
+        final_relative_projection_error=final_relative_projection_error,
         output_dir=root,
     )
 
@@ -704,53 +771,51 @@ def _probability_flow_correction(
     return correction
 
 
-def _run_reference(
+def _advance_reference(
     game: Game,
     diffusion: Diffusion | None,
     config: ExperimentConfig,
-    initial: torch.Tensor,
-    times: np.ndarray,
-    snapshots_by_index: dict[int, float],
-) -> tuple[torch.Tensor | None, dict[float, np.ndarray]]:
-    if not config.run_reference:
-        return None, {}
+    particles: torch.Tensor,
+    time_value: float,
+    step_size: float,
+    noise_generator: torch.Generator,
+) -> torch.Tensor:
+    """Advance the matched Euler or Euler--Maruyama reference by one step."""
 
-    particles = initial.detach().clone()
-    snapshots = {float(times[0]): to_numpy(particles).copy()}
-    noise_generator = torch.Generator().manual_seed(
-        config.seed + 2 if config.reference_seed is None else config.reference_seed
-    )
     with torch.no_grad():
-        for step in range(len(times) - 1):
-            time_value = float(times[step])
-            step_size = float(times[step + 1] - times[step])
-            drift = game.velocity(particles, time_value)
-            _validate_velocity(drift, particles, "reference drift")
-            increment = step_size * drift
-            if config.stochastic:
-                if diffusion is None:
-                    raise RuntimeError("stochastic reference has no diffusion")
-                noise_matrix = diffusion.noise_matrix(particles, time_value)
-                brownian = torch.randn(
-                    (particles.shape[0], noise_matrix.shape[2]),
-                    dtype=particles.dtype,
-                    generator=noise_generator,
-                ).to(particles.device)
-                increment = increment + step_size**0.5 * torch.einsum(
-                    "nir,nr->ni",
-                    noise_matrix,
-                    brownian,
+        drift = game.velocity(particles, time_value)
+        _validate_velocity(drift, particles, "reference drift")
+        increment = step_size * drift
+        if config.stochastic:
+            if diffusion is None:
+                raise RuntimeError("stochastic reference has no diffusion")
+            noise_matrix = diffusion.noise_matrix(particles, time_value)
+            if (
+                noise_matrix.ndim != 3
+                or noise_matrix.shape[0] != particles.shape[0]
+                or noise_matrix.shape[1] != particles.shape[1]
+                or noise_matrix.shape[2] < 1
+            ):
+                raise ValueError(
+                    "diffusion noise matrix must have shape (N, d, brownian_dim)"
                 )
-            particles = particles + increment
-            if not torch.isfinite(particles).all():
-                method = _reference_method(config)
-                raise FloatingPointError(
-                    f"{method} state is nonfinite at t={times[step + 1]:g}"
-                )
-            state_index = step + 1
-            if state_index in snapshots_by_index:
-                snapshots[snapshots_by_index[state_index]] = to_numpy(particles).copy()
-    return particles.detach(), snapshots
+            brownian = torch.randn(
+                (particles.shape[0], noise_matrix.shape[2]),
+                dtype=particles.dtype,
+                generator=noise_generator,
+            ).to(particles.device)
+            increment = increment + step_size**0.5 * torch.einsum(
+                "nir,nr->ni",
+                noise_matrix,
+                brownian,
+            )
+        next_particles = particles + increment
+        if not torch.isfinite(next_particles).all():
+            method = _reference_method(config)
+            raise FloatingPointError(
+                f"{method} state is nonfinite after t={time_value:g}"
+            )
+    return next_particles.detach()
 
 
 def _reference_method(config: ExperimentConfig) -> str:
@@ -837,6 +902,7 @@ def _save_result(result: ExperimentResult) -> Path:
                 result.projection_times,
                 result.projection_error,
                 result.relative_projection_error,
+                result.alpha_norm,
                 result.jacobian_sigma_max,
                 result.jacobian_sigma_min,
                 result.jacobian_condition,
@@ -847,12 +913,20 @@ def _save_result(result: ExperimentResult) -> Path:
         ),
         delimiter=",",
         header=(
-            "time,rms_projection_error,relative_projection_error,sigma_max,"
+            "time,rms_projection_error,relative_projection_error,alpha_norm,sigma_max,"
             "sigma_min,condition_number,retained_rank,score_rms,"
             "diffusion_correction_rms"
         ),
         comments="",
     )
+    if result.trajectory_rms_error.size:
+        np.savetxt(
+            folder / "trajectory_rms_error.csv",
+            np.column_stack((result.times, result.trajectory_rms_error)),
+            delimiter=",",
+            header="time,trajectory_rms_error",
+            comments="",
+        )
     write_json(folder / "config.json", asdict(result.config))
     write_json(folder / "game.json", result.game_metadata)
     if result.diffusion_metadata is not None:

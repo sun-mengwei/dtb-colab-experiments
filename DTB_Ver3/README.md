@@ -65,6 +65,26 @@ and saves it in `final_time_rms_vs_step_size.csv`. The sweep additionally saves
 For stochastic runs this label-paired RMS is descriptive; the sliced
 2-Wasserstein distance remains the distributional comparison.
 
+Every run records the time-dependent diagnostics
+
+```text
+trajectory_rms_error[k]
+    = sqrt(mean_i(||X_DTB_i(t_k) - X_reference_i(t_k)||_2^2))
+
+relative_projection_error[k]
+    = ||J_k alpha_k - g_k||_2 / ||g_k||_2
+
+alpha_norm[k] = ||alpha_k||_2.
+```
+
+The first quantity is saved in `trajectory_rms_error.csv`; the latter two are
+columns in `diagnostics.csv`. The notebooks create
+`configuration_diagnostics.png` for the selected configuration. A sweep saves
+the last-step relative projection error for each step size in
+`relative_projection_error_vs_step_size.csv` and plots it in
+`relative_projection_error_vs_step_size.png`. Its projection time is
+`T - h`, because the projection is evaluated before the last state update.
+
 `experiment.py` owns initialization, subset tangent selection, direct
 particle/parameter updates, score transport, progress reports, reference
 integration, and output serialization. `games.py` contains dynamics and
