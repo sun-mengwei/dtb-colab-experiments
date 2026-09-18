@@ -30,7 +30,7 @@ from .dtb import (
     tangent_spatial_terms,
 )
 from .games import Diffusion, Game
-from .models import ResidualMLP, ResidualMMNN, TangentMLP, count_parameters
+from .models import MMNN, ResidualMLP, ResidualMMNN, TangentMLP, count_parameters
 from .utils import (
     make_time_grid,
     resolve_device,
@@ -62,7 +62,7 @@ class ExperimentConfig:
     final_time: float = 2.0
     snapshot_times: tuple[float, ...] = (0.0, 0.5, 1.0, 2.0)
     width: int = 16
-    rank: int = 12
+    rank: int = 12  # Used only by MMNN model kinds.
     depth: int = 2
     activation: str = "tanh"
     model_kind: str = "residual_mlp"
@@ -89,9 +89,15 @@ class ExperimentConfig:
     def validate(self) -> None:
         if self.dynamics not in {"deterministic", "stochastic"}:
             raise ValueError("dynamics must be 'deterministic' or 'stochastic'")
-        if self.model_kind not in {"mlp", "residual_mlp", "residual_mmnn"}:
+        if self.model_kind not in {
+            "mlp",
+            "residual_mlp",
+            "mmnn",
+            "residual_mmnn",
+        }:
             raise ValueError(
-                "model_kind must be 'mlp', 'residual_mlp', or 'residual_mmnn'"
+                "model_kind must be 'mlp', 'residual_mlp', 'mmnn', or "
+                "'residual_mmnn'"
             )
         if self.subset_tangent_selection not in {"fixed", "resample_each_step"}:
             raise ValueError(
@@ -124,13 +130,15 @@ class ExperimentConfig:
             )
         if (
             self.width < 1
-            or self.rank < 1
             or self.depth < 1
             or self.cpu_threads < 1
         ):
-            raise ValueError("width, rank, depth, and cpu_threads must be positive")
-        if self.model_kind == "residual_mmnn" and self.depth < 2:
-            raise ValueError("residual_mmnn requires depth >= 2")
+            raise ValueError("width, depth, and cpu_threads must be positive")
+        if self.model_kind in {"mmnn", "residual_mmnn"}:
+            if self.rank < 1:
+                raise ValueError("rank must be positive for an MMNN")
+            if self.depth < 2:
+                raise ValueError("an MMNN requires depth >= 2")
         if self.progress_reports < 0:
             raise ValueError("progress_reports cannot be negative")
         if not 0 <= self.svd_rtol < 1:
@@ -741,6 +749,18 @@ def _make_model(
             activation=config.activation,
             dtype=dtype,
             zero_init_output=config.zero_init_output,
+        )
+    if config.model_kind == "mmnn":
+        if config.zero_init_output:
+            raise ValueError("zero_init_output requires a residual model kind")
+        return MMNN(
+            dim,
+            width=config.width,
+            rank=config.rank,
+            depth=config.depth,
+            d_out=dim,
+            activation=config.activation,
+            dtype=dtype,
         )
     if config.zero_init_output:
         raise ValueError(

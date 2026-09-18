@@ -164,6 +164,21 @@ The residual MMNN uses layers `A * activation(W x + b) + c`. Its random
 features `W,b` are frozen, so only the 338 trainable `A,c` coordinates belong
 to `theta` for the 2D width/rank/depth `12/12/3` configuration.
 
+The built-in neural choices are `mlp`, `residual_mlp`, `mmnn`, and
+`residual_mmnn`. `width`, `depth`, and `activation` apply to both families;
+`rank` applies only to the MMNN choices. The oscillatory notebook exposes one
+`NETWORK_FAMILY = "mmnn"` switch and computes the full-basis size from the
+chosen model, so changing it to `"mlp"` does not require editing assertions.
+Any vector-valued PyTorch module can also be supplied directly:
+
+```python
+result = run_experiment(game, config, model=my_model)
+```
+
+Its output must have the same shape as the particles. With
+`tangent_input_mode="fixed_initial_labels"`, initialize the supplied map as
+the identity on those labels.
+
 The update implemented by the runner is
 
 ```text
