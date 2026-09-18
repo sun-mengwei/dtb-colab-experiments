@@ -16,6 +16,7 @@ from .games import (
     FunctionalDiffusion,
     FunctionalGame,
     Game,
+    OscillatoryGame,
 )
 from .models import ResidualMLP, TangentMLP
 
@@ -30,6 +31,7 @@ __all__ = [
     "FunctionalDiffusion",
     "FunctionalGame",
     "Game",
+    "OscillatoryGame",
     "ResidualMLP",
     "StepSizeSweepResult",
     "TangentMLP",

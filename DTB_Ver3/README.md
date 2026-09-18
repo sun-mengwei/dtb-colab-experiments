@@ -124,12 +124,48 @@ from DTB_Ver3 import BlockCournotGame
 game = BlockCournotGame(block_mus=(7/4, 33/20), block_size=5, b=2.0)
 ```
 
+The oscillatory accumulated-map example is available as a package game and a
+dedicated notebook:
+
+```python
+import numpy as np
+
+from DTB_Ver3 import ExperimentConfig, OscillatoryGame
+
+game = OscillatoryGame(
+    linear_damping=0.5,
+    coupling=0.2,
+    epsilon=0.5,
+    omega=4 * np.pi,
+)
+config = ExperimentConfig(
+    initial_law="uniform",
+    initial_low=-1.0,
+    initial_high=1.0,
+    model_kind="residual_mlp",
+    zero_init_output=True,
+    basis_size=354,
+    subset_tangent_selection="fixed",
+    tangent_input_mode="fixed_initial_labels",
+    track_network_map=True,
+)
+```
+
+Here the game drift is evaluated at the accumulated particles while the
+parameter tangent is evaluated at immutable initial labels. Network tracking
+saves the distinct nonlinear neural map, its one-step tangent prediction, the
+physical/network gap, and parameter-curvature diagnostics. See
+`notebooks/oscillatory_accumulated_map_dtb.ipynb`.
+
 The update implemented by the runner is
 
 ```text
-X[k+1] = X[k] + h J[S_k](theta[k], X[k]) alpha[k]
+X[k+1] = X[k] + h J[S_k](theta[k], B[k]) alpha[k]
 theta[k+1, S_k] = theta[k, S_k] + h alpha[k]
 ```
+
+`B[k]` is `X[k]` for `tangent_input_mode="current_particles"` and the fixed
+initial labels for `tangent_input_mode="fixed_initial_labels"`.
 
 By default a fresh random parameter subset is selected at every iteration. Set
 `subset_tangent_selection="fixed"` to reuse one subset for the whole run. In

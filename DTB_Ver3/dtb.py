@@ -170,8 +170,9 @@ def project_velocity(
     relative_residual = torch.linalg.vector_norm(difference) / torch.linalg.vector_norm(
         target_velocity
     ).clamp_min(torch.finfo(target_velocity.dtype).tiny)
-    minimum = float(singular_values[-1].item())
-    condition = float(singular_values[0].item()) / minimum if minimum > 0 else float("inf")
+    retained_values = singular_values[retained]
+    minimum_retained = float(retained_values[-1].item())
+    condition = float(singular_values[0].item()) / minimum_retained
     return TangentProjection(
         alpha=alpha,
         velocity=velocity,
@@ -194,6 +195,7 @@ def dtb_step(
     step_size: float,
     chunk_size: int,
     svd_rtol: float,
+    tangent_inputs: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, TangentProjection]:
     r"""Advance particles and parameters with the same projected increment.
 
@@ -203,15 +205,20 @@ def dtb_step(
     ``theta_{k+1}[S_k] = theta_k[S_k] + h alpha_k``.
 
     The updated neural map is never evaluated to replace ``X_{k+1}``. There
-    are no resets or refits.
+    are no resets or refits. By default the tangent is evaluated at the
+    current particles. Pass fixed ``tangent_inputs`` to evaluate the moving
+    parameter basis at immutable reference labels instead.
     """
 
     if step_size <= 0:
         raise ValueError("step_size must be positive")
+    basis_inputs = particles if tangent_inputs is None else tangent_inputs
+    if basis_inputs.shape != particles.shape:
+        raise ValueError("tangent_inputs must have the particle shape")
     _, tangent_matrix = subset_tangent_selection(
         theta,
         selected,
-        particles,
+        basis_inputs,
         model,
         structure,
         chunk_size=chunk_size,

@@ -6,6 +6,7 @@ A new game only needs a dimension, a name, and a ``velocity(x, t)`` method.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Callable, Mapping, Protocol, runtime_checkable
 
@@ -185,6 +186,77 @@ class FunctionalGame:
 
     def metadata(self) -> Mapping[str, object]:
         return {"name": self.name, "dim": self.dim, "kind": "functional"}
+
+
+@dataclass(frozen=True)
+class OscillatoryGame:
+    r"""Two-dimensional oscillatory potential game.
+
+    With ``x=(x1,x2)``, the velocity is the gradient of
+
+    ``Phi = -lambda/2 |x|^2 - gamma/2 (x1-x2)^2``
+    ``      + epsilon/omega [cos(omega x1) + cos(omega x2)]``.
+    """
+
+    linear_damping: float = 0.5
+    coupling: float = 0.2
+    epsilon: float = 0.5
+    omega: float = 4.0 * math.pi
+    name: str = "oscillatory_2d"
+    dim: int = 2
+
+    def __post_init__(self) -> None:
+        values = torch.tensor(
+            [self.linear_damping, self.coupling, self.epsilon, self.omega],
+            dtype=torch.float64,
+        )
+        if not torch.isfinite(values).all():
+            raise ValueError("oscillatory game parameters must be finite")
+        if self.linear_damping < 0 or self.coupling < 0:
+            raise ValueError("linear_damping and coupling must be nonnegative")
+        if self.epsilon < 0 or self.omega <= 0:
+            raise ValueError("epsilon must be nonnegative and omega must be positive")
+
+    def potential(self, particles: torch.Tensor) -> torch.Tensor:
+        """Return the scalar potential at each particle."""
+
+        _check_particles(particles, self.dim)
+        first, second = particles.unbind(dim=-1)
+        return (
+            -0.5 * self.linear_damping * (first.square() + second.square())
+            - 0.5 * self.coupling * (first - second).square()
+            + (self.epsilon / self.omega)
+            * (torch.cos(self.omega * first) + torch.cos(self.omega * second))
+        )
+
+    def velocity(self, particles: torch.Tensor, time: float = 0.0) -> torch.Tensor:
+        """Return ``grad(Phi)`` with the particle shape."""
+
+        del time
+        _check_particles(particles, self.dim)
+        first, second = particles.unbind(dim=-1)
+        return torch.stack(
+            (
+                -self.linear_damping * first
+                - self.coupling * (first - second)
+                - self.epsilon * torch.sin(self.omega * first),
+                -self.linear_damping * second
+                - self.coupling * (second - first)
+                - self.epsilon * torch.sin(self.omega * second),
+            ),
+            dim=-1,
+        )
+
+    def metadata(self) -> Mapping[str, object]:
+        return {
+            "name": self.name,
+            "kind": "oscillatory_potential",
+            "dim": self.dim,
+            "linear_damping": self.linear_damping,
+            "coupling": self.coupling,
+            "epsilon": self.epsilon,
+            "omega": self.omega,
+        }
 
 
 @dataclass(frozen=True)

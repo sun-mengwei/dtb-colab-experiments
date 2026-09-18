@@ -52,6 +52,8 @@ def sample_initial_particles(
     dtype: torch.dtype,
     device: torch.device,
     generator: torch.Generator,
+    uniform_low: float = 0.0,
+    uniform_high: float = 1.0,
 ) -> torch.Tensor:
     """Draw reproducible CPU samples, then transfer the complete cloud."""
 
@@ -65,6 +67,8 @@ def sample_initial_particles(
         dtype=dtype,
         device=device,
         generator=generator,
+        uniform_low=uniform_low,
+        uniform_high=uniform_high,
     )
     return particles
 
@@ -80,10 +84,12 @@ def sample_initial_with_score(
     dtype: torch.dtype,
     device: torch.device,
     generator: torch.Generator,
+    uniform_low: float = 0.0,
+    uniform_high: float = 1.0,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Sample an initial cloud and its analytical density score.
 
-    ``smoothed_uniform`` is ``U([0,1]^d) + N(0, smoothing_std^2 I)``.
+    ``smoothed_uniform`` is ``U([low,high]^d) + N(0, smoothing_std^2 I)``.
     Its score represents the softened boundary. ``uniform`` returns the
     interior score zero; its distributional boundary score is not represented.
     """
@@ -92,6 +98,10 @@ def sample_initial_with_score(
         raise ValueError("count and dim must be positive")
     if smoothing_std <= 0 or gaussian_std <= 0:
         raise ValueError("smoothing_std and gaussian_std must be positive")
+    if not math.isfinite(uniform_low) or not math.isfinite(uniform_high):
+        raise ValueError("uniform interval bounds must be finite")
+    if uniform_high <= uniform_low:
+        raise ValueError("uniform_high must be greater than uniform_low")
     if law not in {"gaussian", "uniform", "smoothed_uniform"}:
         raise ValueError("law must be 'gaussian', 'uniform', or 'smoothed_uniform'")
     if law == "gaussian":
@@ -100,7 +110,9 @@ def sample_initial_with_score(
         score = -(particles - gaussian_mean) / gaussian_std**2
         return particles.to(device), score.to(device)
 
-    particles = torch.rand((count, dim), dtype=dtype, generator=generator)
+    particles = uniform_low + (uniform_high - uniform_low) * torch.rand(
+        (count, dim), dtype=dtype, generator=generator
+    )
     if law == "uniform":
         return particles.to(device), torch.zeros_like(particles, device=device)
 
@@ -109,8 +121,8 @@ def sample_initial_with_score(
         dtype=dtype,
         generator=generator,
     )
-    upper = particles / smoothing_std
-    lower = (particles - 1.0) / smoothing_std
+    upper = (particles - uniform_low) / smoothing_std
+    lower = (particles - uniform_high) / smoothing_std
     density = (torch.special.ndtr(upper) - torch.special.ndtr(lower)).clamp_min(
         torch.finfo(dtype).tiny
     )
@@ -257,7 +269,11 @@ def plot_diagnostics(
     axes[0].set(xlabel="Time", ylabel="RMS projection residual", title="DTB projection error")
     axes[1].plot(times, condition, color="#7c3aed", linewidth=1.2)
     axes[1].set_yscale("log")
-    axes[1].set(xlabel="Time", ylabel=r"$\kappa_2(J)$", title="Selected Jacobian condition")
+    axes[1].set(
+        xlabel="Time",
+        ylabel=r"$\kappa_2(J_{\mathrm{retained}})$",
+        title="Retained Jacobian condition",
+    )
     for axis in axes:
         axis.grid(alpha=0.2, which="both")
     if output_path is not None:
@@ -337,8 +353,8 @@ def plot_configuration_diagnostics(
     axes[1, 1].set_yscale("log")
     axes[1, 1].set(
         xlabel="Time",
-        ylabel=r"$\kappa_2(J)$",
-        title="Selected Jacobian condition",
+        ylabel=r"$\kappa_2(J_{\mathrm{retained}})$",
+        title="Retained Jacobian condition",
     )
     for axis in axes.ravel():
         axis.grid(alpha=0.2, which="both")

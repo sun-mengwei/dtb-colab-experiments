@@ -60,6 +60,7 @@ class ResidualMLP(nn.Module):
         depth: int = 2,
         activation: str = "tanh",
         dtype: torch.dtype = torch.float64,
+        zero_init_output: bool = False,
     ) -> None:
         super().__init__()
         self.net = TangentMLP(
@@ -69,6 +70,12 @@ class ResidualMLP(nn.Module):
             activation=activation,
             dtype=dtype,
         ).net
+        if zero_init_output:
+            output_layer = self.net[-1]
+            if not isinstance(output_layer, nn.Linear):
+                raise TypeError("the residual MLP output layer must be linear")
+            nn.init.zeros_(output_layer.weight)
+            nn.init.zeros_(output_layer.bias)
 
     def forward(self, particles: torch.Tensor) -> torch.Tensor:
         return particles + self.net(particles)

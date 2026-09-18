@@ -22,7 +22,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .dtb import advance_score, dtb_step, flat_parameters, tangent_spatial_terms
+from .dtb import (
+    advance_score,
+    dtb_step,
+    evaluate_model,
+    flat_parameters,
+    tangent_spatial_terms,
+)
 from .games import Diffusion, Game
 from .models import ResidualMLP, TangentMLP, count_parameters
 from .utils import (
@@ -47,6 +53,8 @@ class ExperimentConfig:
     reference_seed: int | None = None
     particle_count: int = 3000
     initial_law: str = "smoothed_uniform"
+    initial_low: float = 0.0
+    initial_high: float = 1.0
     smoothing_std: float = 0.02
     gaussian_mean: float = 0.5
     gaussian_std: float = 0.15
@@ -57,8 +65,11 @@ class ExperimentConfig:
     depth: int = 2
     activation: str = "tanh"
     model_kind: str = "residual_mlp"
+    zero_init_output: bool = False
     basis_size: int = 64
     subset_tangent_selection: str = "resample_each_step"
+    tangent_input_mode: str = "current_particles"
+    track_network_map: bool = False
     svd_rtol: float = 1e-6
     jacobian_chunk: int = 256
     score_chunk: int = 32
@@ -83,6 +94,22 @@ class ExperimentConfig:
             raise ValueError(
                 "subset_tangent_selection must be 'fixed' or 'resample_each_step'"
             )
+        if self.tangent_input_mode not in {
+            "current_particles",
+            "fixed_initial_labels",
+        }:
+            raise ValueError(
+                "tangent_input_mode must be 'current_particles' or "
+                "'fixed_initial_labels'"
+            )
+        if self.stochastic and self.tangent_input_mode == "fixed_initial_labels":
+            raise ValueError(
+                "fixed_initial_labels is currently supported for deterministic dynamics"
+            )
+        if self.track_network_map and self.tangent_input_mode != "fixed_initial_labels":
+            raise ValueError(
+                "track_network_map requires tangent_input_mode='fixed_initial_labels'"
+            )
         if (
             self.particle_count < 1
             or self.basis_size < 1
@@ -100,6 +127,10 @@ class ExperimentConfig:
             raise ValueError("svd_rtol must lie in [0, 1)")
         if self.gaussian_std <= 0 or self.smoothing_std <= 0:
             raise ValueError("gaussian_std and smoothing_std must be positive")
+        if not np.isfinite(self.initial_low) or not np.isfinite(self.initial_high):
+            raise ValueError("initial interval bounds must be finite")
+        if self.initial_high <= self.initial_low:
+            raise ValueError("initial_high must be greater than initial_low")
 
 
 @dataclass
@@ -116,16 +147,23 @@ class ExperimentResult:
     projection_times: np.ndarray
     initial_particles: np.ndarray
     initial_score: np.ndarray | None
+    initial_parameters: np.ndarray
+    final_parameters: np.ndarray
     dtb_final_particles: np.ndarray
     final_score: np.ndarray | None
     reference_final_particles: np.ndarray | None
     dtb_snapshots: dict[float, np.ndarray]
     score_snapshots: dict[float, np.ndarray]
     reference_snapshots: dict[float, np.ndarray]
+    network_snapshots: dict[float, np.ndarray]
+    network_tangent_prediction_snapshots: dict[float, np.ndarray]
     projection_error: np.ndarray
     relative_projection_error: np.ndarray
     alpha_norm: np.ndarray
     trajectory_rms_error: np.ndarray
+    physical_network_gap: np.ndarray
+    network_curvature_error: np.ndarray
+    network_trajectory_rms_error: np.ndarray
     jacobian_sigma_max: np.ndarray
     jacobian_sigma_min: np.ndarray
     jacobian_condition: np.ndarray
@@ -160,6 +198,7 @@ class ExperimentResult:
             "reference_method": self.reference_method,
             "model_kind": self.config.model_kind,
             "subset_tangent_selection": self.config.subset_tangent_selection,
+            "tangent_input_mode": self.config.tangent_input_mode,
             "particle_count": int(self.initial_particles.shape[0]),
             "dimension": int(self.initial_particles.shape[1]),
             "step_count": int(len(self.projection_times)),
@@ -176,6 +215,16 @@ class ExperimentResult:
                 None
                 if self.trajectory_rms_error.size == 0
                 else float(self.trajectory_rms_error[-1])
+            ),
+            "final_physical_network_gap": (
+                None
+                if self.physical_network_gap.size == 0
+                else float(self.physical_network_gap[-1])
+            ),
+            "final_network_trajectory_rms_error": (
+                None
+                if self.network_trajectory_rms_error.size == 0
+                else float(self.network_trajectory_rms_error[-1])
             ),
             "final_score_rms": (
                 None
@@ -254,14 +303,36 @@ class DTBExperiment:
             dtype=dtype,
             device=device,
             generator=initial_generator,
+            uniform_low=config.initial_low,
+            uniform_high=config.initial_high,
         )
         particles = initial.detach().clone()
         score = initial_score.detach().clone() if config.stochastic else None
         model = self.model or _make_model(self.game.dim, config, dtype)
         model = model.to(device=device, dtype=dtype)
         theta, structure = flat_parameters(model)
+        initial_theta = theta.detach().clone()
         parameter_count = count_parameters(model)
         basis_size = min(config.basis_size, parameter_count)
+        initial_network_particles = None
+        if config.tangent_input_mode == "fixed_initial_labels":
+            initial_network_particles = evaluate_model(
+                theta,
+                initial,
+                model,
+                structure,
+            ).detach()
+            tolerance = 1e-6 if dtype == torch.float32 else 1e-12
+            if not torch.allclose(
+                initial_network_particles,
+                particles,
+                rtol=0.0,
+                atol=tolerance,
+            ):
+                raise ValueError(
+                    "fixed_initial_labels requires T_theta0(z)=z; use a residual "
+                    "MLP with zero_init_output=True or supply an identity-initialized model"
+                )
 
         basis_generator = torch.Generator().manual_seed(config.seed + 1)
         selected = None
@@ -279,10 +350,59 @@ class DTBExperiment:
         score_snapshots = (
             {float(times[0]): to_numpy(score).copy()} if score is not None else {}
         )
+        tangent_labels = (
+            initial.detach().clone()
+            if config.tangent_input_mode == "fixed_initial_labels"
+            else None
+        )
+        network_particles = (
+            initial_network_particles
+            if config.track_network_map
+            else None
+        )
+        network_snapshots = (
+            {float(times[0]): to_numpy(network_particles).copy()}
+            if network_particles is not None
+            else {}
+        )
+        network_tangent_prediction_snapshots = (
+            {float(times[0]): to_numpy(network_particles).copy()}
+            if network_particles is not None
+            else {}
+        )
         projection_error: list[float] = []
         relative_projection_error: list[float] = []
         alpha_norm: list[float] = []
         trajectory_rms_error: list[float] = [0.0] if config.run_reference else []
+        physical_network_gap: list[float] = (
+            [
+                float(
+                    (particles - network_particles)
+                    .square()
+                    .sum(dim=1)
+                    .mean()
+                    .sqrt()
+                    .item()
+                )
+            ]
+            if network_particles is not None
+            else []
+        )
+        network_curvature_error: list[float] = []
+        network_trajectory_rms_error: list[float] = (
+            [
+                float(
+                    (network_particles - initial)
+                    .square()
+                    .sum(dim=1)
+                    .mean()
+                    .sqrt()
+                    .item()
+                )
+            ]
+            if network_particles is not None and config.run_reference
+            else []
+        )
         sigma_max: list[float] = []
         sigma_min: list[float] = []
         condition: list[float] = []
@@ -314,7 +434,8 @@ class DTBExperiment:
             f"particles={config.particle_count}, steps={total_steps}, "
             f"parameters={parameter_count}, model={config.model_kind}, "
             f"subset_size={basis_size}, "
-            f"subset_selection={config.subset_tangent_selection}",
+            f"subset_selection={config.subset_tangent_selection}, "
+            f"tangent_inputs={config.tangent_input_mode}",
             flush=True,
         )
         for step in range(total_steps):
@@ -354,6 +475,7 @@ class DTBExperiment:
 
             old_theta = theta
             old_particles = particles
+            old_network_particles = network_particles
             theta, particles, projection = dtb_step(
                 old_theta,
                 selected,
@@ -364,6 +486,7 @@ class DTBExperiment:
                 step_size=step_size,
                 chunk_size=config.jacobian_chunk,
                 svd_rtol=config.svd_rtol,
+                tangent_inputs=tangent_labels,
             )
             if config.stochastic:
                 if score is None:
@@ -382,6 +505,40 @@ class DTBExperiment:
                     spatial_jacobian,
                     gradient_divergence,
                     step_size=step_size,
+                )
+
+            network_tangent_prediction = None
+            if old_network_particles is not None:
+                if tangent_labels is None:
+                    raise RuntimeError("network-map tracking has no fixed labels")
+                network_particles = evaluate_model(
+                    theta,
+                    tangent_labels,
+                    model,
+                    structure,
+                ).detach()
+                network_tangent_prediction = (
+                    old_network_particles + step_size * projection.velocity.detach()
+                )
+                physical_network_gap.append(
+                    float(
+                        (particles - network_particles)
+                        .square()
+                        .sum(dim=1)
+                        .mean()
+                        .sqrt()
+                        .item()
+                    )
+                )
+                network_curvature_error.append(
+                    float(
+                        (network_particles - network_tangent_prediction)
+                        .square()
+                        .sum(dim=1)
+                        .mean()
+                        .sqrt()
+                        .item()
+                    )
                 )
 
             if reference_particles is not None:
@@ -404,13 +561,29 @@ class DTBExperiment:
                         .item()
                     )
                 )
+                if network_particles is not None:
+                    network_trajectory_rms_error.append(
+                        float(
+                            (network_particles - reference_particles)
+                            .square()
+                            .sum(dim=1)
+                            .mean()
+                            .sqrt()
+                            .item()
+                        )
+                    )
 
             projection_error.append(float(projection.rms_residual.item()))
             relative_projection_error.append(float(projection.relative_residual.item()))
             alpha_norm.append(float(torch.linalg.vector_norm(projection.alpha).item()))
             sample_scale = config.particle_count**0.5
             sigma_max.append(float(projection.singular_values[0].item()) * sample_scale)
-            sigma_min.append(float(projection.singular_values[-1].item()) * sample_scale)
+            sigma_min.append(
+                float(
+                    projection.singular_values[projection.retained_rank - 1].item()
+                )
+                * sample_scale
+            )
             condition.append(projection.condition_number)
             retained_rank.append(projection.retained_rank)
 
@@ -422,6 +595,12 @@ class DTBExperiment:
                     score_snapshots[snapshot_time] = to_numpy(score).copy()
                 if reference_particles is not None:
                     reference_snapshots[snapshot_time] = to_numpy(reference_particles).copy()
+                if network_particles is not None:
+                    network_snapshots[snapshot_time] = to_numpy(network_particles).copy()
+                if network_tangent_prediction is not None:
+                    network_tangent_prediction_snapshots[snapshot_time] = to_numpy(
+                        network_tangent_prediction
+                    ).copy()
 
             while report_index < len(report_steps) and state_index >= report_steps[report_index]:
                 if device.type == "cuda":
@@ -466,6 +645,8 @@ class DTBExperiment:
             initial_score=(
                 to_numpy(initial_score).copy() if config.stochastic else None
             ),
+            initial_parameters=to_numpy(initial_theta).copy(),
+            final_parameters=to_numpy(theta).copy(),
             dtb_final_particles=to_numpy(particles).copy(),
             final_score=None if score is None else to_numpy(score).copy(),
             reference_final_particles=(
@@ -474,10 +655,17 @@ class DTBExperiment:
             dtb_snapshots=dtb_snapshots,
             score_snapshots=score_snapshots,
             reference_snapshots=reference_snapshots,
+            network_snapshots=network_snapshots,
+            network_tangent_prediction_snapshots=(
+                network_tangent_prediction_snapshots
+            ),
             projection_error=np.asarray(projection_error),
             relative_projection_error=np.asarray(relative_projection_error),
             alpha_norm=np.asarray(alpha_norm),
             trajectory_rms_error=np.asarray(trajectory_rms_error),
+            physical_network_gap=np.asarray(physical_network_gap),
+            network_curvature_error=np.asarray(network_curvature_error),
+            network_trajectory_rms_error=np.asarray(network_trajectory_rms_error),
             jacobian_sigma_max=np.asarray(sigma_max),
             jacobian_sigma_min=np.asarray(sigma_min),
             jacobian_condition=np.asarray(condition),
@@ -521,14 +709,21 @@ def _make_model(
     config: ExperimentConfig,
     dtype: torch.dtype,
 ) -> nn.Module:
-    model_type = ResidualMLP if config.model_kind == "residual_mlp" else TangentMLP
-    return model_type(
-        dim,
-        width=config.width,
-        depth=config.depth,
-        activation=config.activation,
-        dtype=dtype,
-    )
+    common = {
+        "width": config.width,
+        "depth": config.depth,
+        "activation": config.activation,
+        "dtype": dtype,
+    }
+    if config.model_kind == "residual_mlp":
+        return ResidualMLP(
+            dim,
+            zero_init_output=config.zero_init_output,
+            **common,
+        )
+    if config.zero_init_output:
+        raise ValueError("zero_init_output is only available for residual_mlp")
+    return TangentMLP(dim, **common)
 
 
 def _draw_tangent_subset(
@@ -869,6 +1064,8 @@ def _save_result(result: ExperimentResult) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     np.save(folder / "initial_particles.npy", result.initial_particles)
     np.save(folder / "dtb_final_particles.npy", result.dtb_final_particles)
+    np.save(folder / "initial_parameters.npy", result.initial_parameters)
+    np.save(folder / "final_parameters.npy", result.final_parameters)
     np.save(folder / "subset_tangent_indices.npy", result.selected_indices_history)
     if result.initial_score is not None:
         np.save(folder / "initial_score.npy", result.initial_score)
@@ -876,6 +1073,12 @@ def _save_result(result: ExperimentResult) -> Path:
         np.save(folder / "dtb_final_score.npy", result.final_score)
     if result.reference_final_particles is not None:
         np.save(folder / "reference_final_particles.npy", result.reference_final_particles)
+    if result.network_snapshots:
+        final_snapshot_time = max(result.network_snapshots)
+        np.save(
+            folder / "network_final_particles.npy",
+            result.network_snapshots[final_snapshot_time],
+        )
 
     snapshot_payload: dict[str, np.ndarray] = {
         "times": np.asarray(sorted(result.dtb_snapshots)),
@@ -888,6 +1091,17 @@ def _save_result(result: ExperimentResult) -> Path:
             [
                 result.reference_snapshots[time]
                 for time in sorted(result.reference_snapshots)
+            ]
+        )
+    if result.network_snapshots:
+        snapshot_payload["network"] = np.stack(
+            [result.network_snapshots[time] for time in sorted(result.network_snapshots)]
+        )
+    if result.network_tangent_prediction_snapshots:
+        snapshot_payload["network_tangent_prediction"] = np.stack(
+            [
+                result.network_tangent_prediction_snapshots[time]
+                for time in sorted(result.network_tangent_prediction_snapshots)
             ]
         )
     if result.score_snapshots:
@@ -914,7 +1128,7 @@ def _save_result(result: ExperimentResult) -> Path:
         delimiter=",",
         header=(
             "time,rms_projection_error,relative_projection_error,alpha_norm,sigma_max,"
-            "sigma_min,condition_number,retained_rank,score_rms,"
+            "sigma_min_retained,condition_number,retained_rank,score_rms,"
             "diffusion_correction_rms"
         ),
         comments="",
@@ -925,6 +1139,39 @@ def _save_result(result: ExperimentResult) -> Path:
             np.column_stack((result.times, result.trajectory_rms_error)),
             delimiter=",",
             header="time,trajectory_rms_error",
+            comments="",
+        )
+    if result.physical_network_gap.size:
+        network_reference_error = (
+            result.network_trajectory_rms_error
+            if result.network_trajectory_rms_error.size
+            else np.full_like(result.physical_network_gap, np.nan)
+        )
+        np.savetxt(
+            folder / "network_state_diagnostics.csv",
+            np.column_stack(
+                (
+                    result.times,
+                    result.physical_network_gap,
+                    network_reference_error,
+                )
+            ),
+            delimiter=",",
+            header="time,physical_network_gap,network_trajectory_rms_error",
+            comments="",
+        )
+    if result.network_curvature_error.size:
+        np.savetxt(
+            folder / "network_step_diagnostics.csv",
+            np.column_stack(
+                (
+                    result.projection_times,
+                    result.times[1:],
+                    result.network_curvature_error,
+                )
+            ),
+            delimiter=",",
+            header="projection_time,next_time,network_curvature_error",
             comments="",
         )
     write_json(folder / "config.json", asdict(result.config))
