@@ -124,8 +124,8 @@ from DTB_Ver3 import BlockCournotGame
 game = BlockCournotGame(block_mus=(7/4, 33/20), block_size=5, b=2.0)
 ```
 
-The oscillatory accumulated-map example is available as a package game and a
-dedicated notebook:
+The oscillatory DTB example is available as a package game and a dedicated
+notebook:
 
 ```python
 import numpy as np
@@ -154,10 +154,9 @@ config = ExperimentConfig(
 )
 ```
 
-Here the game drift is evaluated at the accumulated particles while the
-parameter tangent is evaluated at immutable initial labels. Network tracking
-saves the distinct nonlinear neural map, its one-step tangent prediction, the
-physical/network gap, and parameter-curvature diagnostics. See
+Here the game drift is evaluated at the DTB particles while the parameter
+tangent is evaluated at immutable initial labels. Network tracking saves the
+distinct nonlinear neural map and the DTB/network gap. See
 `notebooks/oscillatory_accumulated_map_dtb.ipynb`.
 
 The residual MMNN uses layers `A * activation(W x + b) + c`. Its random

@@ -174,13 +174,11 @@ class ExperimentResult:
     score_snapshots: dict[float, np.ndarray]
     reference_snapshots: dict[float, np.ndarray]
     network_snapshots: dict[float, np.ndarray]
-    network_tangent_prediction_snapshots: dict[float, np.ndarray]
     projection_error: np.ndarray
     relative_projection_error: np.ndarray
     alpha_norm: np.ndarray
     trajectory_rms_error: np.ndarray
     physical_network_gap: np.ndarray
-    network_curvature_error: np.ndarray
     network_trajectory_rms_error: np.ndarray
     jacobian_sigma_max: np.ndarray
     jacobian_sigma_min: np.ndarray
@@ -384,11 +382,6 @@ class DTBExperiment:
             if network_particles is not None
             else {}
         )
-        network_tangent_prediction_snapshots = (
-            {float(times[0]): to_numpy(network_particles).copy()}
-            if network_particles is not None
-            else {}
-        )
         projection_error: list[float] = []
         relative_projection_error: list[float] = []
         alpha_norm: list[float] = []
@@ -407,7 +400,6 @@ class DTBExperiment:
             if network_particles is not None
             else []
         )
-        network_curvature_error: list[float] = []
         network_trajectory_rms_error: list[float] = (
             [
                 float(
@@ -494,7 +486,6 @@ class DTBExperiment:
 
             old_theta = theta
             old_particles = particles
-            old_network_particles = network_particles
             theta, particles, projection = dtb_step(
                 old_theta,
                 selected,
@@ -526,8 +517,7 @@ class DTBExperiment:
                     step_size=step_size,
                 )
 
-            network_tangent_prediction = None
-            if old_network_particles is not None:
+            if network_particles is not None:
                 if tangent_labels is None:
                     raise RuntimeError("network-map tracking has no fixed labels")
                 network_particles = evaluate_model(
@@ -536,22 +526,9 @@ class DTBExperiment:
                     model,
                     structure,
                 ).detach()
-                network_tangent_prediction = (
-                    old_network_particles + step_size * projection.velocity.detach()
-                )
                 physical_network_gap.append(
                     float(
                         (particles - network_particles)
-                        .square()
-                        .sum(dim=1)
-                        .mean()
-                        .sqrt()
-                        .item()
-                    )
-                )
-                network_curvature_error.append(
-                    float(
-                        (network_particles - network_tangent_prediction)
                         .square()
                         .sum(dim=1)
                         .mean()
@@ -616,10 +593,6 @@ class DTBExperiment:
                     reference_snapshots[snapshot_time] = to_numpy(reference_particles).copy()
                 if network_particles is not None:
                     network_snapshots[snapshot_time] = to_numpy(network_particles).copy()
-                if network_tangent_prediction is not None:
-                    network_tangent_prediction_snapshots[snapshot_time] = to_numpy(
-                        network_tangent_prediction
-                    ).copy()
 
             while report_index < len(report_steps) and state_index >= report_steps[report_index]:
                 if device.type == "cuda":
@@ -675,15 +648,11 @@ class DTBExperiment:
             score_snapshots=score_snapshots,
             reference_snapshots=reference_snapshots,
             network_snapshots=network_snapshots,
-            network_tangent_prediction_snapshots=(
-                network_tangent_prediction_snapshots
-            ),
             projection_error=np.asarray(projection_error),
             relative_projection_error=np.asarray(relative_projection_error),
             alpha_norm=np.asarray(alpha_norm),
             trajectory_rms_error=np.asarray(trajectory_rms_error),
             physical_network_gap=np.asarray(physical_network_gap),
-            network_curvature_error=np.asarray(network_curvature_error),
             network_trajectory_rms_error=np.asarray(network_trajectory_rms_error),
             jacobian_sigma_max=np.asarray(sigma_max),
             jacobian_sigma_min=np.asarray(sigma_min),
@@ -1140,13 +1109,6 @@ def _save_result(result: ExperimentResult) -> Path:
         snapshot_payload["network"] = np.stack(
             [result.network_snapshots[time] for time in sorted(result.network_snapshots)]
         )
-    if result.network_tangent_prediction_snapshots:
-        snapshot_payload["network_tangent_prediction"] = np.stack(
-            [
-                result.network_tangent_prediction_snapshots[time]
-                for time in sorted(result.network_tangent_prediction_snapshots)
-            ]
-        )
     if result.score_snapshots:
         snapshot_payload["score"] = np.stack(
             [result.score_snapshots[time] for time in sorted(result.score_snapshots)]
@@ -1201,20 +1163,6 @@ def _save_result(result: ExperimentResult) -> Path:
             ),
             delimiter=",",
             header="time,physical_network_gap,network_trajectory_rms_error",
-            comments="",
-        )
-    if result.network_curvature_error.size:
-        np.savetxt(
-            folder / "network_step_diagnostics.csv",
-            np.column_stack(
-                (
-                    result.projection_times,
-                    result.times[1:],
-                    result.network_curvature_error,
-                )
-            ),
-            delimiter=",",
-            header="projection_time,next_time,network_curvature_error",
             comments="",
         )
     write_json(folder / "config.json", asdict(result.config))
