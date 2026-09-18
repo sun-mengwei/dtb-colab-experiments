@@ -166,8 +166,9 @@ to `theta` for the 2D width/rank/depth `12/12/3` configuration.
 The built-in neural choices are `mlp`, `residual_mlp`, `mmnn`, and
 `residual_mmnn`. `width`, `depth`, and `activation` apply to both families;
 `rank` applies only to the MMNN choices. The oscillatory notebook exposes one
-`NETWORK_FAMILY = "mmnn"` switch and computes the full-basis size from the
-chosen model, so changing it to `"mlp"` does not require editing assertions.
+`NETWORK_FAMILY = "mmnn"` switch. Its `TANGENT_BASIS_SIZE` setting accepts
+`None` for the full trainable basis or a positive integer for a smaller
+coordinate subset; no post-run assertion assumes a particular size.
 Any vector-valued PyTorch module can also be supplied directly:
 
 ```python
