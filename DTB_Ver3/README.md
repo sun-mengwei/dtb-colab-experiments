@@ -88,9 +88,9 @@ the last-step relative projection error for each step size in
 `experiment.py` owns initialization, subset tangent selection, direct
 particle/parameter updates, score transport, progress reports, reference
 integration, and output serialization. `games.py` contains dynamics and
-diffusion interfaces; `models.py` contains ordinary and residual MLPs; `dtb.py`
-contains `subset_tangent_selection` and the truncated-SVD projection; and
-`utils.py` contains sampling and plots.
+diffusion interfaces; `models.py` contains ordinary/residual MLPs and the MMNN
+layers; `dtb.py` contains `subset_tangent_selection` and the truncated-SVD
+projection; and `utils.py` contains sampling and plots.
 
 To define a future example without editing the runner:
 
@@ -142,9 +142,12 @@ config = ExperimentConfig(
     initial_law="uniform",
     initial_low=-1.0,
     initial_high=1.0,
-    model_kind="residual_mlp",
+    model_kind="residual_mmnn",
+    width=12,
+    rank=12,
+    depth=3,
     zero_init_output=True,
-    basis_size=354,
+    basis_size=338,
     subset_tangent_selection="fixed",
     tangent_input_mode="fixed_initial_labels",
     track_network_map=True,
@@ -156,6 +159,10 @@ parameter tangent is evaluated at immutable initial labels. Network tracking
 saves the distinct nonlinear neural map, its one-step tangent prediction, the
 physical/network gap, and parameter-curvature diagnostics. See
 `notebooks/oscillatory_accumulated_map_dtb.ipynb`.
+
+The residual MMNN uses layers `A * activation(W x + b) + c`. Its random
+features `W,b` are frozen, so only the 338 trainable `A,c` coordinates belong
+to `theta` for the 2D width/rank/depth `12/12/3` configuration.
 
 The update implemented by the runner is
 

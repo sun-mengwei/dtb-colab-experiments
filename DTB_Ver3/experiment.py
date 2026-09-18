@@ -30,7 +30,7 @@ from .dtb import (
     tangent_spatial_terms,
 )
 from .games import Diffusion, Game
-from .models import ResidualMLP, TangentMLP, count_parameters
+from .models import ResidualMLP, ResidualMMNN, TangentMLP, count_parameters
 from .utils import (
     make_time_grid,
     resolve_device,
@@ -62,6 +62,7 @@ class ExperimentConfig:
     final_time: float = 2.0
     snapshot_times: tuple[float, ...] = (0.0, 0.5, 1.0, 2.0)
     width: int = 16
+    rank: int = 12
     depth: int = 2
     activation: str = "tanh"
     model_kind: str = "residual_mlp"
@@ -88,8 +89,10 @@ class ExperimentConfig:
     def validate(self) -> None:
         if self.dynamics not in {"deterministic", "stochastic"}:
             raise ValueError("dynamics must be 'deterministic' or 'stochastic'")
-        if self.model_kind not in {"mlp", "residual_mlp"}:
-            raise ValueError("model_kind must be 'mlp' or 'residual_mlp'")
+        if self.model_kind not in {"mlp", "residual_mlp", "residual_mmnn"}:
+            raise ValueError(
+                "model_kind must be 'mlp', 'residual_mlp', or 'residual_mmnn'"
+            )
         if self.subset_tangent_selection not in {"fixed", "resample_each_step"}:
             raise ValueError(
                 "subset_tangent_selection must be 'fixed' or 'resample_each_step'"
@@ -119,8 +122,15 @@ class ExperimentConfig:
             raise ValueError(
                 "particle_count, basis_size, jacobian_chunk, and score_chunk must be positive"
             )
-        if self.width < 1 or self.depth < 1 or self.cpu_threads < 1:
-            raise ValueError("width, depth, and cpu_threads must be positive")
+        if (
+            self.width < 1
+            or self.rank < 1
+            or self.depth < 1
+            or self.cpu_threads < 1
+        ):
+            raise ValueError("width, rank, depth, and cpu_threads must be positive")
+        if self.model_kind == "residual_mmnn" and self.depth < 2:
+            raise ValueError("residual_mmnn requires depth >= 2")
         if self.progress_reports < 0:
             raise ValueError("progress_reports cannot be negative")
         if not 0 <= self.svd_rtol < 1:
@@ -330,8 +340,9 @@ class DTBExperiment:
                 atol=tolerance,
             ):
                 raise ValueError(
-                    "fixed_initial_labels requires T_theta0(z)=z; use a residual "
-                    "MLP with zero_init_output=True or supply an identity-initialized model"
+                    "fixed_initial_labels requires T_theta0(z)=z; use a "
+                    "residual model with zero_init_output=True or supply an "
+                    "identity-initialized model"
                 )
 
         basis_generator = torch.Generator().manual_seed(config.seed + 1)
@@ -721,8 +732,20 @@ def _make_model(
             zero_init_output=config.zero_init_output,
             **common,
         )
+    if config.model_kind == "residual_mmnn":
+        return ResidualMMNN(
+            dim,
+            width=config.width,
+            rank=config.rank,
+            depth=config.depth,
+            activation=config.activation,
+            dtype=dtype,
+            zero_init_output=config.zero_init_output,
+        )
     if config.zero_init_output:
-        raise ValueError("zero_init_output is only available for residual_mlp")
+        raise ValueError(
+            "zero_init_output is only available for residual_mlp or residual_mmnn"
+        )
     return TangentMLP(dim, **common)
 
 

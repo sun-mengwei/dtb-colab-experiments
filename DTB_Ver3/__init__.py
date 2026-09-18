@@ -18,7 +18,7 @@ from .games import (
     Game,
     OscillatoryGame,
 )
-from .models import ResidualMLP, TangentMLP
+from .models import MMNN, MMNNLayer, ResidualMLP, ResidualMMNN, TangentMLP
 
 __all__ = [
     "BlockCournotGame",
@@ -32,7 +32,10 @@ __all__ = [
     "FunctionalGame",
     "Game",
     "OscillatoryGame",
+    "MMNN",
+    "MMNNLayer",
     "ResidualMLP",
+    "ResidualMMNN",
     "StepSizeSweepResult",
     "TangentMLP",
     "run_experiment",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 
@@ -79,6 +81,150 @@ class ResidualMLP(nn.Module):
 
     def forward(self, particles: torch.Tensor) -> torch.Tensor:
         return particles + self.net(particles)
+
+
+class MMNNLayer(nn.Module):
+    r"""Matrix-mixing layer ``A sigma(W x + b) + c``.
+
+    The random feature parameters ``W`` and ``b`` remain frozen.  DTB evolves
+    only the trainable mixing coefficients ``A`` and ``c``.  This is the MMNN
+    parameterization used by the Version 2 oscillatory experiment.
+    """
+
+    def __init__(
+        self,
+        d_in: int,
+        d_out: int,
+        width: int,
+        *,
+        activation: str = "tanh",
+        dtype: torch.dtype = torch.float64,
+    ) -> None:
+        super().__init__()
+        if d_in < 1 or d_out < 1 or width < 1:
+            raise ValueError("d_in, d_out, and width must be positive")
+        activations = {
+            "relu": torch.relu,
+            "tanh": torch.tanh,
+            "gelu": torch.nn.functional.gelu,
+            "sin": torch.sin,
+        }
+        if activation not in activations:
+            raise ValueError(f"unknown activation {activation!r}")
+
+        self.W = nn.Parameter(
+            torch.randn(width, d_in, dtype=dtype) / math.sqrt(d_in),
+            requires_grad=False,
+        )
+        self.b = nn.Parameter(
+            torch.zeros(width, dtype=dtype),
+            requires_grad=False,
+        )
+        self.A = nn.Parameter(
+            torch.randn(d_out, width, dtype=dtype) / math.sqrt(width)
+        )
+        self.c = nn.Parameter(torch.zeros(d_out, dtype=dtype))
+        self._activation = activations[activation]
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self._activation(inputs @ self.W.T + self.b) @ self.A.T + self.c
+
+
+class MMNN(nn.Module):
+    """Composition of frozen-feature matrix-mixing layers.
+
+    ``width`` is the number of frozen nonlinear features in every layer,
+    ``rank`` is the intermediate state dimension, and ``depth`` is the number
+    of MMNN layers.
+    """
+
+    def __init__(
+        self,
+        d_in: int,
+        *,
+        width: int,
+        rank: int,
+        depth: int,
+        d_out: int,
+        activation: str = "tanh",
+        dtype: torch.dtype = torch.float64,
+    ) -> None:
+        super().__init__()
+        if depth < 2:
+            raise ValueError("MMNN depth must be at least 2")
+        if rank < 1:
+            raise ValueError("MMNN rank must be positive")
+
+        layers: list[MMNNLayer] = [
+            MMNNLayer(
+                d_in,
+                rank,
+                width,
+                activation=activation,
+                dtype=dtype,
+            )
+        ]
+        for _ in range(depth - 2):
+            layers.append(
+                MMNNLayer(
+                    rank,
+                    rank,
+                    width,
+                    activation=activation,
+                    dtype=dtype,
+                )
+            )
+        layers.append(
+            MMNNLayer(
+                rank,
+                d_out,
+                width,
+                activation=activation,
+                dtype=dtype,
+            )
+        )
+        self.layers = nn.ModuleList(layers)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        values = inputs
+        for layer in self.layers:
+            values = layer(values)
+        if values.shape[-1] == 1:
+            values = values.squeeze(-1)
+        return values
+
+
+class ResidualMMNN(nn.Module):
+    """Residual map ``T_theta(x) = x + F_theta(x)`` with an MMNN residual."""
+
+    def __init__(
+        self,
+        dim: int,
+        *,
+        width: int = 12,
+        rank: int = 12,
+        depth: int = 3,
+        activation: str = "tanh",
+        dtype: torch.dtype = torch.float64,
+        zero_init_output: bool = False,
+    ) -> None:
+        super().__init__()
+        self.net = MMNN(
+            dim,
+            width=width,
+            rank=rank,
+            depth=depth,
+            d_out=dim,
+            activation=activation,
+            dtype=dtype,
+        )
+        if zero_init_output:
+            final_layer = self.net.layers[-1]
+            nn.init.zeros_(final_layer.A)
+            nn.init.zeros_(final_layer.c)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return inputs + self.net(inputs)
 
 
 def count_parameters(model: nn.Module) -> int:
