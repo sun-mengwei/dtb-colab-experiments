@@ -185,11 +185,16 @@ class StepSizeSweepResult:
     records: np.ndarray
     columns: tuple[str, ...]
     metric_name: str
+    final_time_rms_error: np.ndarray
     output_dir: Path
 
     @property
     def csv_path(self) -> Path:
         return self.output_dir / "step_size_sweep.csv"
+
+    @property
+    def final_time_rms_csv_path(self) -> Path:
+        return self.output_dir / "final_time_rms_vs_step_size.csv"
 
 
 class DTBExperiment:
@@ -599,6 +604,19 @@ def run_step_size_sweep(
         header=",".join(columns),
         comments="",
     )
+    final_rms_values = [runs[step_size].final_paired_rms for step_size in values]
+    if any(value is None for value in final_rms_values):
+        raise RuntimeError("final-time RMS requires a reference solution for every run")
+    final_time_rms_error = np.asarray(final_rms_values, dtype=float)
+    if not np.isfinite(final_time_rms_error).all():
+        raise FloatingPointError("final-time RMS sweep contains a nonfinite value")
+    np.savetxt(
+        root / "final_time_rms_vs_step_size.csv",
+        np.column_stack((values, final_time_rms_error)),
+        delimiter=",",
+        header="step_size,final_time_rms_error",
+        comments="",
+    )
     write_json(
         root / "step_size_sweep.json",
         {
@@ -611,6 +629,9 @@ def run_step_size_sweep(
             "step_sizes": list(values),
             "finest_step": finest_step,
             "cloud_metric": metric_name,
+            "final_time_rms_definition": (
+                "sqrt(mean_i(||X_DTB_i(T)-X_reference_i(T)||_2^2))"
+            ),
             "columns": list(columns),
         },
     )
@@ -620,6 +641,7 @@ def run_step_size_sweep(
         records=table,
         columns=columns,
         metric_name=metric_name,
+        final_time_rms_error=final_time_rms_error,
         output_dir=root,
     )
 

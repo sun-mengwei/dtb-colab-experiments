@@ -374,3 +374,44 @@ def plot_step_size_sweep(
         path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(path, dpi=300, bbox_inches="tight")
     return fig
+
+
+def plot_final_time_rms_sweep(
+    step_sizes,
+    rms_errors,
+    *,
+    final_time: float,
+    output_path: str | Path | None = None,
+) -> plt.Figure:
+    r"""Plot final-time paired-particle RMS error against the step size.
+
+    The plotted quantity is
+    ``sqrt(mean_i(||X_DTB_i(T) - X_reference_i(T)||_2^2))``.
+    """
+
+    steps = to_numpy(step_sizes).astype(float, copy=False)
+    errors = to_numpy(rms_errors).astype(float, copy=False)
+    if steps.ndim != 1 or errors.shape != steps.shape or steps.size < 1:
+        raise ValueError("step_sizes and rms_errors must be nonempty vectors")
+    if not np.isfinite(steps).all() or not np.isfinite(errors).all():
+        raise ValueError("step sizes and RMS errors must be finite")
+    if (steps <= 0).any() or (errors < 0).any() or final_time <= 0:
+        raise ValueError("step sizes and final_time must be positive; RMS cannot be negative")
+
+    order = np.argsort(steps)
+    fig, axis = plt.subplots(figsize=(6.4, 4.2), layout="constrained")
+    if (errors > 0).all():
+        axis.loglog(steps[order], errors[order], "o-", color="#176b87", linewidth=1.5)
+    else:
+        axis.semilogx(steps[order], errors[order], "o-", color="#176b87", linewidth=1.5)
+    axis.set(
+        xlabel="Step size $h$",
+        ylabel="Final-time RMS error",
+        title=fr"DTB versus reference at $T={final_time:g}$",
+    )
+    axis.grid(alpha=0.2, which="both")
+    if output_path is not None:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(path, dpi=300, bbox_inches="tight")
+    return fig

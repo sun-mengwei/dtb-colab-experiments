@@ -53,8 +53,17 @@ subset generator. With `subset_tangent_selection="resample_each_step"`, a new
 reproducible parameter-coordinate subset is drawn at every DTB iteration, as in
 `DTB_Game_Ver2/cournot_5d_b2_mu7_4_mlp_deterministic_dtb.ipynb`. Deterministic
 sweeps compare paired particles; stochastic sweeps compare distributions with
-sliced 2-Wasserstein distance. The sweep saves `step_size_sweep.csv`,
-`step_size_sweep.json`, and the individual run folders.
+sliced 2-Wasserstein distance. The sweep also reports
+
+```text
+final_time_rms_error(h)
+    = sqrt(mean_i(||X_DTB_i(T; h) - X_reference_i(T; h)||_2^2))
+```
+
+and saves it in `final_time_rms_vs_step_size.csv`. The sweep additionally saves
+`step_size_sweep.csv`, `step_size_sweep.json`, and the individual run folders.
+For stochastic runs this label-paired RMS is descriptive; the sliced
+2-Wasserstein distance remains the distributional comparison.
 
 `experiment.py` owns initialization, subset tangent selection, direct
 particle/parameter updates, score transport, progress reports, reference
