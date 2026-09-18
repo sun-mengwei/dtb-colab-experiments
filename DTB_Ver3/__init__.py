@@ -17,6 +17,7 @@ from .games import (
     FunctionalGame,
     Game,
 )
+from .models import ResidualMLP, TangentMLP
 
 __all__ = [
     "BlockCournotGame",
@@ -29,7 +30,9 @@ __all__ = [
     "FunctionalDiffusion",
     "FunctionalGame",
     "Game",
+    "ResidualMLP",
     "StepSizeSweepResult",
+    "TangentMLP",
     "run_experiment",
     "run_step_size_sweep",
 ]

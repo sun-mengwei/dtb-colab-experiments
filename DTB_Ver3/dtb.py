@@ -59,7 +59,7 @@ def evaluate_model(
     return functional_call(model, state, (particles,))
 
 
-def restricted_tangent_matrix(
+def subset_tangent_selection(
     theta: torch.Tensor,
     selected: torch.Tensor,
     particles: torch.Tensor,
@@ -68,7 +68,7 @@ def restricted_tangent_matrix(
     *,
     chunk_size: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    r"""Return the selected parameter tangent in tensor and matrix forms.
+    r"""Return a parameter-subset tangent in tensor and matrix forms.
 
     The outputs have shapes ``(N, d, m)`` and ``(N*d, m)``. ``chunk_size``
     splits only the particle dimension and therefore changes memory and speed,
@@ -199,8 +199,8 @@ def dtb_step(
 
     This performs
 
-    ``X_{k+1} = X_k + h J(theta_k, X_k) alpha_k`` and
-    ``theta_{k+1}[S] = theta_k[S] + h alpha_k``.
+    ``X_{k+1} = X_k + h J_{S_k}(theta_k, X_k) alpha_k`` and
+    ``theta_{k+1}[S_k] = theta_k[S_k] + h alpha_k``.
 
     The updated neural map is never evaluated to replace ``X_{k+1}``. There
     are no resets or refits.
@@ -208,7 +208,7 @@ def dtb_step(
 
     if step_size <= 0:
         raise ValueError("step_size must be positive")
-    _, tangent_matrix = restricted_tangent_matrix(
+    _, tangent_matrix = subset_tangent_selection(
         theta,
         selected,
         particles,

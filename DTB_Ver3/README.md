@@ -7,7 +7,11 @@ interface around the DTB projection code. A complete deterministic run is:
 from DTB_Ver3 import CournotGame, ExperimentConfig, run_experiment
 
 game = CournotGame(dim=5, b=2.0, mu=7/4)
-result = run_experiment(game, ExperimentConfig())
+config = ExperimentConfig(
+    model_kind="residual_mlp",
+    subset_tangent_selection="resample_each_step",
+)
+result = run_experiment(game, config)
 ```
 
 For stochastic dynamics with isotropic noise amplitude `0.1`:
@@ -44,17 +48,20 @@ sweep = run_step_size_sweep(
 )
 ```
 
-Each run resets the same seed. Deterministic sweeps compare paired particles;
-stochastic sweeps compare distributions with sliced 2-Wasserstein distance.
-The sweep saves `step_size_sweep.csv` and `step_size_sweep.json` alongside the
-individual run folders.
+Each run resets the same particle seed, residual-MLP initialization, and tangent
+subset generator. With `subset_tangent_selection="resample_each_step"`, a new
+reproducible parameter-coordinate subset is drawn at every DTB iteration, as in
+`DTB_Game_Ver2/cournot_5d_b2_mu7_4_mlp_deterministic_dtb.ipynb`. Deterministic
+sweeps compare paired particles; stochastic sweeps compare distributions with
+sliced 2-Wasserstein distance. The sweep saves `step_size_sweep.csv`,
+`step_size_sweep.json`, and the individual run folders.
 
-`experiment.py` owns initialization, the fixed tangent-coordinate selection,
-the direct particle/parameter updates, score transport, progress reports,
-reference integration, and output serialization. `games.py` contains dynamics
-and diffusion interfaces; `models.py` contains the MLP; `dtb.py` contains
-tangent construction and the truncated-SVD projection; and `utils.py` contains
-sampling and plots.
+`experiment.py` owns initialization, subset tangent selection, direct
+particle/parameter updates, score transport, progress reports, reference
+integration, and output serialization. `games.py` contains dynamics and
+diffusion interfaces; `models.py` contains ordinary and residual MLPs; `dtb.py`
+contains `subset_tangent_selection` and the truncated-SVD projection; and
+`utils.py` contains sampling and plots.
 
 To define a future example without editing the runner:
 
@@ -91,10 +98,12 @@ game = BlockCournotGame(block_mus=(7/4, 33/20), block_size=5, b=2.0)
 The update implemented by the runner is
 
 ```text
-X[k+1] = X[k] + h J(theta[k], X[k]) alpha[k]
-theta[k+1, selected] = theta[k, selected] + h alpha[k]
+X[k+1] = X[k] + h J[S_k](theta[k], X[k]) alpha[k]
+theta[k+1, S_k] = theta[k, S_k] + h alpha[k]
 ```
 
-The selected parameter coordinates are fixed for the whole run. The updated
-neural map is not evaluated to replace the accumulated particles, and there
-are no resets or refits.
+By default a fresh random parameter subset is selected at every iteration. Set
+`subset_tangent_selection="fixed"` to reuse one subset for the whole run. In
+both cases, the updated neural map is not evaluated to replace the accumulated
+particles, and there are no resets or refits. The full subset history is saved
+as `subset_tangent_indices.npy`.

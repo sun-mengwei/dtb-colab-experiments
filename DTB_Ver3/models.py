@@ -43,6 +43,37 @@ class TangentMLP(nn.Module):
         return self.net(particles)
 
 
+class ResidualMLP(nn.Module):
+    """Residual map ``T_theta(x) = x + net_theta(x)``.
+
+    The identity skip has no trainable parameters, so its parameter tangent is
+    the same as the tangent of ``net_theta``. This lets the experiment use the
+    residual-map convention from the comparison notebook while continuing to
+    advance the accumulated particles directly.
+    """
+
+    def __init__(
+        self,
+        dim: int,
+        *,
+        width: int = 16,
+        depth: int = 2,
+        activation: str = "tanh",
+        dtype: torch.dtype = torch.float64,
+    ) -> None:
+        super().__init__()
+        self.net = TangentMLP(
+            dim,
+            width=width,
+            depth=depth,
+            activation=activation,
+            dtype=dtype,
+        ).net
+
+    def forward(self, particles: torch.Tensor) -> torch.Tensor:
+        return particles + self.net(particles)
+
+
 def count_parameters(model: nn.Module) -> int:
     """Return the number of trainable scalar parameters."""
 

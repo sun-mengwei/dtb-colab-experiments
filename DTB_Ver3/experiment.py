@@ -24,7 +24,7 @@ import torch.nn as nn
 
 from .dtb import advance_score, dtb_step, flat_parameters, tangent_spatial_terms
 from .games import Diffusion, Game
-from .models import TangentMLP, count_parameters
+from .models import ResidualMLP, TangentMLP, count_parameters
 from .utils import (
     make_time_grid,
     resolve_device,
@@ -56,7 +56,9 @@ class ExperimentConfig:
     width: int = 16
     depth: int = 2
     activation: str = "tanh"
+    model_kind: str = "residual_mlp"
     basis_size: int = 64
+    subset_tangent_selection: str = "resample_each_step"
     svd_rtol: float = 1e-6
     jacobian_chunk: int = 256
     score_chunk: int = 32
@@ -75,6 +77,12 @@ class ExperimentConfig:
     def validate(self) -> None:
         if self.dynamics not in {"deterministic", "stochastic"}:
             raise ValueError("dynamics must be 'deterministic' or 'stochastic'")
+        if self.model_kind not in {"mlp", "residual_mlp"}:
+            raise ValueError("model_kind must be 'mlp' or 'residual_mlp'")
+        if self.subset_tangent_selection not in {"fixed", "resample_each_step"}:
+            raise ValueError(
+                "subset_tangent_selection must be 'fixed' or 'resample_each_step'"
+            )
         if (
             self.particle_count < 1
             or self.basis_size < 1
@@ -123,6 +131,7 @@ class ExperimentResult:
     score_rms: np.ndarray
     diffusion_correction_rms: np.ndarray
     selected_indices: np.ndarray
+    selected_indices_history: np.ndarray
     elapsed_seconds: float
     final_mean_distance: float | None
     final_paired_rms: float | None
@@ -147,6 +156,8 @@ class ExperimentResult:
             "game": self.game_name,
             "dynamics": self.dynamics,
             "reference_method": self.reference_method,
+            "model_kind": self.config.model_kind,
+            "subset_tangent_selection": self.config.subset_tangent_selection,
             "particle_count": int(self.initial_particles.shape[0]),
             "dimension": int(self.initial_particles.shape[1]),
             "step_count": int(len(self.projection_times)),
@@ -225,22 +236,21 @@ class DTBExperiment:
         )
         particles = initial.detach().clone()
         score = initial_score.detach().clone() if config.stochastic else None
-        model = self.model or TangentMLP(
-            self.game.dim,
-            width=config.width,
-            depth=config.depth,
-            activation=config.activation,
-            dtype=dtype,
-        )
+        model = self.model or _make_model(self.game.dim, config, dtype)
         model = model.to(device=device, dtype=dtype)
         theta, structure = flat_parameters(model)
         parameter_count = count_parameters(model)
         basis_size = min(config.basis_size, parameter_count)
 
-        # The coordinate set is selected once and remains fixed for the run.
         basis_generator = torch.Generator().manual_seed(config.seed + 1)
-        selected = torch.randperm(parameter_count, generator=basis_generator)[:basis_size]
-        selected = selected.sort().values.to(device)
+        selected = None
+        if config.subset_tangent_selection == "fixed":
+            selected = _draw_tangent_subset(
+                parameter_count,
+                basis_size,
+                basis_generator,
+                device,
+            )
 
         times = make_time_grid(config.final_time, config.step_size)
         snapshots_by_index = snapshot_indices(times, config.snapshot_times)
@@ -256,6 +266,7 @@ class DTBExperiment:
         retained_rank: list[int] = []
         score_rms: list[float] = []
         diffusion_rms: list[float] = []
+        selected_history: list[np.ndarray] = []
 
         total_steps = len(times) - 1
         report_steps = _progress_steps(total_steps, config.progress_reports)
@@ -269,11 +280,24 @@ class DTBExperiment:
             f"DTB run: game={self.game.name}, dynamics={config.dynamics}, "
             f"reference={reference_method}, device={device}, dtype={dtype}, "
             f"particles={config.particle_count}, steps={total_steps}, "
-            f"parameters={parameter_count}, fixed_basis={basis_size}",
+            f"parameters={parameter_count}, model={config.model_kind}, "
+            f"subset_size={basis_size}, "
+            f"subset_selection={config.subset_tangent_selection}",
             flush=True,
         )
         for step in range(total_steps):
             current_time = float(times[step])
+            step_size = float(times[step + 1] - times[step])
+            if config.subset_tangent_selection == "resample_each_step":
+                selected = _draw_tangent_subset(
+                    parameter_count,
+                    basis_size,
+                    basis_generator,
+                    device,
+                )
+            if selected is None:
+                raise RuntimeError("tangent subset was not initialized")
+            selected_history.append(to_numpy(selected).copy())
             drift = self.game.velocity(particles, current_time)
             _validate_velocity(drift, particles, "game drift")
 
@@ -305,7 +329,7 @@ class DTBExperiment:
                 target,
                 model,
                 structure,
-                step_size=config.step_size,
+                step_size=step_size,
                 chunk_size=config.jacobian_chunk,
                 svd_rtol=config.svd_rtol,
             )
@@ -325,7 +349,7 @@ class DTBExperiment:
                     score,
                     spatial_jacobian,
                     gradient_divergence,
-                    step_size=config.step_size,
+                    step_size=step_size,
                 )
 
             projection_error.append(float(projection.rms_residual.item()))
@@ -408,6 +432,7 @@ class DTBExperiment:
             score_rms=np.asarray(score_rms),
             diffusion_correction_rms=np.asarray(diffusion_rms),
             selected_indices=to_numpy(selected).copy(),
+            selected_indices_history=np.stack(selected_history),
             elapsed_seconds=elapsed_seconds,
             final_mean_distance=final_mean_distance,
             final_paired_rms=final_paired_rms,
@@ -438,6 +463,33 @@ def run_experiment(
     return DTBExperiment(game, config, diffusion=diffusion, model=model).run()
 
 
+def _make_model(
+    dim: int,
+    config: ExperimentConfig,
+    dtype: torch.dtype,
+) -> nn.Module:
+    model_type = ResidualMLP if config.model_kind == "residual_mlp" else TangentMLP
+    return model_type(
+        dim,
+        width=config.width,
+        depth=config.depth,
+        activation=config.activation,
+        dtype=dtype,
+    )
+
+
+def _draw_tangent_subset(
+    parameter_count: int,
+    subset_size: int,
+    generator: torch.Generator,
+    device: torch.device,
+) -> torch.Tensor:
+    """Draw one sorted parameter-coordinate subset on CPU, then transfer it."""
+
+    selected = torch.randperm(parameter_count, generator=generator)[:subset_size]
+    return selected.sort().values.to(device)
+
+
 def run_step_size_sweep(
     game: Game,
     step_sizes,
@@ -450,11 +502,12 @@ def run_step_size_sweep(
 ) -> StepSizeSweepResult:
     """Run matched experiments while changing only the time-step size.
 
-    Every run resets the same seed, so the initial particles, MLP parameters,
-    and fixed tangent coordinates agree. Deterministic clouds use paired RMS;
-    stochastic clouds use sliced 2-Wasserstein distance because individual
-    Euler--Maruyama particles do not share a deterministic pairing with the
-    probability-flow particles.
+    Every run resets the same seeds, so the initial particles and MLP parameters
+    agree. With ``resample_each_step``, each run also starts from the same
+    reproducible sequence of random tangent-coordinate subsets. Deterministic
+    clouds use paired RMS; stochastic clouds use sliced 2-Wasserstein distance
+    because individual Euler--Maruyama particles do not share a deterministic
+    pairing with the probability-flow particles.
     """
 
     config = base_config or ExperimentConfig()
@@ -552,6 +605,9 @@ def run_step_size_sweep(
             "game": game.name,
             "dynamics": config.dynamics,
             "reference_method": _reference_method(config),
+            "model_kind": config.model_kind,
+            "subset_tangent_selection": config.subset_tangent_selection,
+            "subset_seed": config.seed + 1,
             "step_sizes": list(values),
             "finest_step": finest_step,
             "cloud_metric": metric_name,
@@ -726,7 +782,7 @@ def _save_result(result: ExperimentResult) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     np.save(folder / "initial_particles.npy", result.initial_particles)
     np.save(folder / "dtb_final_particles.npy", result.dtb_final_particles)
-    np.save(folder / "selected_parameter_indices.npy", result.selected_indices)
+    np.save(folder / "subset_tangent_indices.npy", result.selected_indices_history)
     if result.initial_score is not None:
         np.save(folder / "initial_score.npy", result.initial_score)
     if result.final_score is not None:
