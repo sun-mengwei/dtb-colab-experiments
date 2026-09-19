@@ -179,6 +179,39 @@ Its output must have the same shape as the particles. With
 `tangent_input_mode="fixed_initial_labels"`, initialize the supplied map as
 the identity on those labels.
 
+The two-player high-frequency non-potential benchmark is implemented by
+`OscillatoryNonpotentialGame`:
+
+```python
+import numpy as np
+
+from DTB_Ver3 import ExperimentConfig, OscillatoryNonpotentialGame, run_experiment
+
+game = OscillatoryNonpotentialGame(kappa=1.0, amplitude=1.0, omega=16 * np.pi)
+config = ExperimentConfig(
+    dynamics="deterministic",
+    reference_integrator="rk4",
+    reference_step_size=0.00025,
+    step_size=0.001,
+    initial_law="uniform",
+    initial_low=-1.0,
+    initial_high=1.0,
+)
+result = run_experiment(game, config)
+```
+
+`notebooks/oscillatory_nonpotential_frequency_sweep.ipynb` runs the matched
+frequency sweep `omega/pi = (1, 4, 8, 16)`, compares DTB with refined-step
+RK4, and saves final RMS, relative final RMS, relative tangent-projection
+error, field/cloud plots, and hardest-frequency diagnostics. The game
+statement does not prescribe `amplitude` or `kappa`; the notebook exposes
+both and uses `1.0` for each by default.
+
+`reference_integrator="auto"` preserves the original behavior: Euler for a
+deterministic run and Euler--Maruyama for a stochastic run. Deterministic
+runs may choose `"rk4"`; `reference_step_size` then sets the maximum RK4
+substep inside every DTB step.
+
 The update implemented by the runner is
 
 ```text

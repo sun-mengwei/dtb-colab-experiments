@@ -17,6 +17,7 @@ from .games import (
     FunctionalGame,
     Game,
     OscillatoryGame,
+    OscillatoryNonpotentialGame,
 )
 from .models import MMNN, MMNNLayer, ResidualMLP, ResidualMMNN, TangentMLP
 
@@ -32,6 +33,7 @@ __all__ = [
     "FunctionalGame",
     "Game",
     "OscillatoryGame",
+    "OscillatoryNonpotentialGame",
     "MMNN",
     "MMNNLayer",
     "ResidualMLP",

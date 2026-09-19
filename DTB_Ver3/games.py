@@ -260,6 +260,81 @@ class OscillatoryGame:
 
 
 @dataclass(frozen=True)
+class OscillatoryNonpotentialGame:
+    r"""Two-player high-frequency non-potential game.
+
+    The player payoffs are
+
+    ``Pi_1 = -kappa/2 x_1^2 + amplitude x_1 sin(omega x_2)`` and
+    ``Pi_2 = -kappa/2 x_2^2 - amplitude x_2 sin(omega x_1)``.
+
+    Therefore the pseudo-gradient used as the particle velocity is
+
+    ``(-kappa x_1 + amplitude sin(omega x_2),``
+    `` -kappa x_2 - amplitude sin(omega x_1))``.
+    """
+
+    kappa: float = 1.0
+    amplitude: float = 1.0
+    omega: float = math.pi
+    name: str = "oscillatory_nonpotential_2d"
+    dim: int = 2
+
+    def __post_init__(self) -> None:
+        values = torch.tensor(
+            [self.kappa, self.amplitude, self.omega],
+            dtype=torch.float64,
+        )
+        if not torch.isfinite(values).all():
+            raise ValueError("oscillatory non-potential game parameters must be finite")
+        if self.kappa <= 0 or self.omega <= 0:
+            raise ValueError("kappa and omega must be positive")
+        if self.amplitude < 0:
+            raise ValueError("amplitude must be nonnegative")
+
+    def payoffs(self, particles: torch.Tensor) -> torch.Tensor:
+        """Return ``(Pi_1, Pi_2)`` for every particle."""
+
+        _check_particles(particles, self.dim)
+        first, second = particles.unbind(dim=-1)
+        return torch.stack(
+            (
+                -0.5 * self.kappa * first.square()
+                + self.amplitude * first * torch.sin(self.omega * second),
+                -0.5 * self.kappa * second.square()
+                - self.amplitude * second * torch.sin(self.omega * first),
+            ),
+            dim=-1,
+        )
+
+    def velocity(self, particles: torch.Tensor, time: float = 0.0) -> torch.Tensor:
+        """Return the two players' own-action payoff gradients."""
+
+        del time
+        _check_particles(particles, self.dim)
+        first, second = particles.unbind(dim=-1)
+        return torch.stack(
+            (
+                -self.kappa * first
+                + self.amplitude * torch.sin(self.omega * second),
+                -self.kappa * second
+                - self.amplitude * torch.sin(self.omega * first),
+            ),
+            dim=-1,
+        )
+
+    def metadata(self) -> Mapping[str, object]:
+        return {
+            "name": self.name,
+            "kind": "oscillatory_nonpotential",
+            "dim": self.dim,
+            "kappa": self.kappa,
+            "amplitude": self.amplitude,
+            "omega": self.omega,
+        }
+
+
+@dataclass(frozen=True)
 class CournotGame:
     r"""Cournot best-response dynamics in one symmetric block.
 

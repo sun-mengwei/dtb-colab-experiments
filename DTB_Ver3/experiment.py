@@ -50,7 +50,9 @@ class ExperimentConfig:
 
     dynamics: str = "deterministic"
     run_reference: bool = True
+    reference_integrator: str = "auto"
     reference_seed: int | None = None
+    reference_step_size: float | None = None
     particle_count: int = 3000
     initial_law: str = "smoothed_uniform"
     initial_low: float = 0.0
@@ -89,6 +91,25 @@ class ExperimentConfig:
     def validate(self) -> None:
         if self.dynamics not in {"deterministic", "stochastic"}:
             raise ValueError("dynamics must be 'deterministic' or 'stochastic'")
+        if self.reference_integrator not in {
+            "auto",
+            "euler",
+            "rk4",
+            "euler_maruyama",
+        }:
+            raise ValueError(
+                "reference_integrator must be 'auto', 'euler', 'rk4', or "
+                "'euler_maruyama'"
+            )
+        if self.stochastic and self.reference_integrator in {"euler", "rk4"}:
+            raise ValueError(
+                "stochastic dynamics require reference_integrator='auto' or "
+                "'euler_maruyama'"
+            )
+        if not self.stochastic and self.reference_integrator == "euler_maruyama":
+            raise ValueError(
+                "deterministic dynamics cannot use the Euler--Maruyama reference"
+            )
         if self.model_kind not in {
             "mlp",
             "residual_mlp",
@@ -141,6 +162,11 @@ class ExperimentConfig:
                 raise ValueError("an MMNN requires depth >= 2")
         if self.progress_reports < 0:
             raise ValueError("progress_reports cannot be negative")
+        if self.reference_step_size is not None and (
+            not np.isfinite(self.reference_step_size)
+            or self.reference_step_size <= 0
+        ):
+            raise ValueError("reference_step_size must be positive and finite")
         if not 0 <= self.svd_rtol < 1:
             raise ValueError("svd_rtol must lie in [0, 1)")
         if self.gaussian_std <= 0 or self.smoothing_std <= 0:
@@ -439,6 +465,11 @@ class DTBExperiment:
         started = time.perf_counter()
 
         reference_method = _reference_method(config)
+        reference_step = (
+            "none"
+            if not config.run_reference
+            else f"{config.reference_step_size or config.step_size:g}"
+        )
         print(
             f"DTB run: game={self.game.name}, dynamics={config.dynamics}, "
             f"reference={reference_method}, device={device}, dtype={dtype}, "
@@ -446,7 +477,8 @@ class DTBExperiment:
             f"parameters={parameter_count}, model={config.model_kind}, "
             f"subset_size={basis_size}, "
             f"subset_selection={config.subset_tangent_selection}, "
-            f"tangent_inputs={config.tangent_input_mode}",
+            f"tangent_inputs={config.tangent_input_mode}, "
+            f"reference_step={reference_step}",
             flush=True,
         )
         for step in range(total_steps):
@@ -987,9 +1019,69 @@ def _advance_reference(
     step_size: float,
     noise_generator: torch.Generator,
 ) -> torch.Tensor:
-    """Advance the matched Euler or Euler--Maruyama reference by one step."""
+    """Advance the selected reference method, optionally with refined substeps."""
+
+    maximum_step = config.reference_step_size
+    substep_count = (
+        1
+        if maximum_step is None
+        else max(1, int(np.ceil(step_size / maximum_step - 1e-12)))
+    )
+    substep_size = step_size / substep_count
+    next_particles = particles
+    for substep in range(substep_count):
+        next_particles = _advance_reference_one_step(
+            game,
+            diffusion,
+            config,
+            next_particles,
+            time_value + substep * substep_size,
+            substep_size,
+            noise_generator,
+        )
+    return next_particles
+
+
+def _advance_reference_one_step(
+    game: Game,
+    diffusion: Diffusion | None,
+    config: ExperimentConfig,
+    particles: torch.Tensor,
+    time_value: float,
+    step_size: float,
+    noise_generator: torch.Generator,
+) -> torch.Tensor:
+    """Advance one selected reference-integrator substep."""
 
     with torch.no_grad():
+        method = _reference_method(config)
+        if method == "rk4":
+            first = game.velocity(particles, time_value)
+            _validate_velocity(first, particles, "RK4 k1")
+            second = game.velocity(
+                particles + 0.5 * step_size * first,
+                time_value + 0.5 * step_size,
+            )
+            _validate_velocity(second, particles, "RK4 k2")
+            third = game.velocity(
+                particles + 0.5 * step_size * second,
+                time_value + 0.5 * step_size,
+            )
+            _validate_velocity(third, particles, "RK4 k3")
+            fourth = game.velocity(
+                particles + step_size * third,
+                time_value + step_size,
+            )
+            _validate_velocity(fourth, particles, "RK4 k4")
+            next_particles = particles + (step_size / 6.0) * (
+                first + 2.0 * second + 2.0 * third + fourth
+            )
+            if not torch.isfinite(next_particles).all():
+                raise FloatingPointError(
+                    f"RK4 state is nonfinite after t={time_value:g}"
+                )
+            return next_particles.detach()
+
         drift = game.velocity(particles, time_value)
         _validate_velocity(drift, particles, "reference drift")
         increment = step_size * drift
@@ -1028,6 +1120,8 @@ def _advance_reference(
 def _reference_method(config: ExperimentConfig) -> str:
     if not config.run_reference:
         return "none"
+    if config.reference_integrator != "auto":
+        return config.reference_integrator
     return "euler_maruyama" if config.stochastic else "euler"
 
 
