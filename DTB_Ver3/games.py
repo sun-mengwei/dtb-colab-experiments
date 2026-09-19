@@ -307,21 +307,55 @@ class OscillatoryNonpotentialGame:
             dim=-1,
         )
 
+    def damping_velocity(self, particles: torch.Tensor) -> torch.Tensor:
+        r"""Return the low-frequency drift ``d(x) = -kappa * x``."""
+
+        _check_particles(particles, self.dim)
+        return -self.kappa * particles
+
+    def oscillatory_velocity(self, particles: torch.Tensor) -> torch.Tensor:
+        r"""Return ``q_omega(x) = A(sin(omega*x2), -sin(omega*x1))``."""
+
+        _check_particles(particles, self.dim)
+        first, second = particles.unbind(dim=-1)
+        return self.amplitude * torch.stack(
+            (
+                torch.sin(self.omega * second),
+                -torch.sin(self.omega * first),
+            ),
+            dim=-1,
+        )
+
+    def velocity_jacobian(self, particles: torch.Tensor) -> torch.Tensor:
+        r"""Return ``D b_omega(x)`` with shape ``(N, 2, 2)``."""
+
+        _check_particles(particles, self.dim)
+        first, second = particles.unbind(dim=-1)
+        diagonal = torch.full_like(first, -self.kappa)
+        upper = self.amplitude * self.omega * torch.cos(self.omega * second)
+        lower = -self.amplitude * self.omega * torch.cos(self.omega * first)
+        first_row = torch.stack((diagonal, upper), dim=-1)
+        second_row = torch.stack((lower, diagonal), dim=-1)
+        return torch.stack((first_row, second_row), dim=-2)
+
+    def symmetric_growth_rate(self, particles: torch.Tensor) -> torch.Tensor:
+        r"""Return ``lambda_max((Db + Db^T)/2)`` at every particle.
+
+        In this two-dimensional game the logarithmic growth rate is
+        ``-kappa + A*omega/2 * |cos(omega*x2)-cos(omega*x1)|``.
+        Positive values identify locations where infinitesimal errors can grow.
+        """
+
+        _check_particles(particles, self.dim)
+        first, second = particles.unbind(dim=-1)
+        contrast = torch.cos(self.omega * second) - torch.cos(self.omega * first)
+        return -self.kappa + 0.5 * self.amplitude * self.omega * contrast.abs()
+
     def velocity(self, particles: torch.Tensor, time: float = 0.0) -> torch.Tensor:
         """Return the two players' own-action payoff gradients."""
 
         del time
-        _check_particles(particles, self.dim)
-        first, second = particles.unbind(dim=-1)
-        return torch.stack(
-            (
-                -self.kappa * first
-                + self.amplitude * torch.sin(self.omega * second),
-                -self.kappa * second
-                - self.amplitude * torch.sin(self.omega * first),
-            ),
-            dim=-1,
-        )
+        return self.damping_velocity(particles) + self.oscillatory_velocity(particles)
 
     def metadata(self) -> Mapping[str, object]:
         return {

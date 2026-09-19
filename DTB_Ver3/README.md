@@ -207,6 +207,15 @@ error, field/cloud plots, and hardest-frequency diagnostics. The game
 statement does not prescribe `amplitude` or `kappa`; the notebook exposes
 both and uses `1.0` for each by default.
 
+`notebooks/oscillatory_nonpotential_four_hypothesis_sweeps.ipynb` performs
+the full diagnostic protocol for four candidate failure mechanisms. It uses
+`flat_parameters`, `subset_tangent_selection`, `project_velocity`, and
+`dtb_step` directly from `DTB_Ver3.dtb`. Its independent sweeps cover neural
+tangent-basis reset/enrichment, training sample size, SVD cutoff, and time
+step. The game class also exposes `damping_velocity`,
+`oscillatory_velocity`, `velocity_jacobian`, and `symmetric_growth_rate` so
+the notebook's mathematical diagnostics share the exact implemented field.
+
 `reference_integrator="auto"` preserves the original behavior: Euler for a
 deterministic run and Euler--Maruyama for a stochastic run. Deterministic
 runs may choose `"rk4"`; `reference_step_size` then sets the maximum RK4
