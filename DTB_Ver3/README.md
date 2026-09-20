@@ -201,7 +201,7 @@ result = run_experiment(game, config)
 ```
 
 `notebooks/oscillatory_nonpotential_frequency_sweep.ipynb` runs the matched
-frequency sweep `omega/pi = (1, 4, 8, 16)`, compares DTB with refined-step
+frequency sweep `omega/pi = (1, 4, 8)`, compares DTB with refined-step
 RK4, and saves final RMS, relative final RMS, relative tangent-projection
 error, field/cloud plots, and hardest-frequency diagnostics. The game
 statement does not prescribe `amplitude` or `kappa`; the notebook exposes
@@ -263,7 +263,7 @@ penalty is included in the refit objective.
 `notebooks/oscillatory_representation_direct_vs_periodic_refit.ipynb`
 implements an explicit single-seed frequency loop comparing the direct
 parameter update with the periodic full-basis refit. For every value in
-`omega/pi = (1, 4, 8, 16)`, the notebook constructs the game and the standard
+`omega/pi = (1, 4, 8)`, the notebook constructs the game and the standard
 package configurations and calls `run_experiment` and `run_refit_dtb`
 directly; it does not use a separate sweep configuration. Both methods use
 10,000 matched training particles, the same residual-MMNN architecture and
