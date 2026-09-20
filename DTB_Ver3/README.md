@@ -261,16 +261,18 @@ change, and paired RK4 diagnostics.  No parameter norm or parameter-change
 penalty is included in the refit objective.
 
 `notebooks/oscillatory_representation_direct_vs_periodic_refit.ipynb`
-compares the representation power learned by the direct parameter update and
-the periodic full-basis refit. Both methods use 10,000 matched training
-particles, the same residual-MMNN architecture and initialization, and the
-same ordinary-step random tangent schedule. Their full final tangent spaces
-are evaluated on 10,000 independent labels against the same refined-RK4
-oscillatory target for `omega/pi = (1, 4, 8, 16)`. The reusable matched sweep
-is implemented in `representation.py`. The comparison result retains the
-paired final direct, periodic-refit, and RK4 particle clouds; the notebook
-saves them to `final_particle_clouds.npz` and plots a three-column final-state
-comparison for a selected matched seed.
+implements an explicit single-seed frequency loop comparing the direct
+parameter update with the periodic full-basis refit. For every value in
+`omega/pi = (1, 4, 8, 16)`, the notebook constructs the game and the standard
+package configurations and calls `run_experiment` and `run_refit_dtb`
+directly; it does not use a separate sweep configuration. Both methods use
+10,000 matched training particles, the same residual-MMNN architecture and
+initialization, and the same ordinary-step random tangent schedule. Their full
+final tangent spaces are evaluated on 10,000 independent labels against the
+same refined-RK4 oscillatory target. The notebook records representation
+error, full-basis coefficient norm, conditioning, and paired trajectory RMS,
+then plots final direct, periodic-refit, and RK4 particle clouds for every
+frequency.
 
 `reference_integrator="auto"` preserves the original behavior: Euler for a
 deterministic run and Euler--Maruyama for a stochastic run. Deterministic
