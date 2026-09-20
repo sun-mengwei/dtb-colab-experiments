@@ -229,6 +229,15 @@ After the last update it performs a fresh projection using `(theta[T], X[T])`;
 the reported final projection error is therefore evaluated at `T`, rather
 than inherited from the last update at `T-h`.
 
+`notebooks/oscillatory_4pi_basic_dtb_sample_size_sweep.ipynb` fixes
+`omega=4*pi` and provides a shorter two-part study.  The first part runs the
+adaptive random-subset DTB trajectory and plots the coefficient norm,
+projection errors, and refined-RK4 trajectory error against time.  The second
+part freezes the learned final basis `(theta[T], S[T])` and performs an
+independent-validation Monte Carlo sweep over sample size, reporting
+`E_N`, `E_sample`, `E_G`, and `E_c` with means and standard deviations over
+multiple seeds.
+
 `reference_integrator="auto"` preserves the original behavior: Euler for a
 deterministic run and Euler--Maruyama for a stochastic run. Deterministic
 runs may choose `"rk4"`; `reference_step_size` then sets the maximum RK4
