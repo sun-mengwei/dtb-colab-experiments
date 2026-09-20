@@ -652,6 +652,17 @@ class DTBExperiment:
             torch.cuda.synchronize()
         if selected is None:
             raise RuntimeError("tangent subset was not initialized")
+        final_selected = selected
+        if config.subset_tangent_selection == "resample_each_step":
+            # The final diagnostic is evaluated at a new time point T, so give
+            # it the next reproducible random tangent subset S_T rather than
+            # reusing S_{T-h} from the last Euler update.
+            final_selected = _draw_tangent_subset(
+                parameter_count,
+                basis_size,
+                basis_generator,
+                device,
+            )
         final_time = float(times[-1])
         final_drift = self.game.velocity(particles, final_time)
         _validate_velocity(final_drift, particles, "final game drift")
@@ -669,7 +680,7 @@ class DTBExperiment:
         final_basis_inputs = particles if tangent_labels is None else tangent_labels
         final_projection = evaluate_dtb_projection(
             theta,
-            selected,
+            final_selected,
             final_basis_inputs,
             final_target,
             model,
@@ -725,7 +736,7 @@ class DTBExperiment:
             retained_rank=np.asarray(retained_rank),
             score_rms=np.asarray(score_rms),
             diffusion_correction_rms=np.asarray(diffusion_rms),
-            selected_indices=to_numpy(selected).copy(),
+            selected_indices=to_numpy(final_selected).copy(),
             selected_indices_history=np.stack(selected_history),
             final_projection_error=float(final_projection.rms_residual.item()),
             final_relative_projection_error=float(

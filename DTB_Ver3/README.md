@@ -221,8 +221,9 @@ the notebook's mathematical diagnostics share the exact implemented field.
 
 `notebooks/oscillatory_nonpotential_hypothesis_1_adaptive_dtb.ipynb` is the
 focused, time-evolving version of Hypothesis 1.  It creates one matched MMNN
-run per oscillation frequency, recomputes the tangent basis after every
-parameter update, advances the accumulated particle state with
+run per oscillation frequency, draws a new random parameter-coordinate subset
+at every time point, recomputes the corresponding tangent directions after
+every parameter update, advances the accumulated particle state with
 `X[k+1] = X[k] + h J(theta[k]) alpha[k]`, and compares against refined RK4.
 After the last update it performs a fresh projection using `(theta[T], X[T])`;
 the reported final projection error is therefore evaluated at `T`, rather
