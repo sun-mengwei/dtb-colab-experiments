@@ -79,6 +79,8 @@ class RefitDTBConfig:
     dtype: str = "float64"
     device: str = "auto"
     progress_reports: int = 5
+    refit_interval_steps: int | None = 1
+    refit_interval_fraction: float | None = None
     refit: NetworkRefitConfig = NetworkRefitConfig()
 
     def validate(self) -> None:
@@ -100,7 +102,41 @@ class RefitDTBConfig:
             raise ValueError("svd_rtol must lie in [0, 1)")
         if self.progress_reports < 0:
             raise ValueError("progress_reports cannot be negative")
+        if (
+            self.refit_interval_steps is not None
+            and self.refit_interval_fraction is not None
+        ):
+            raise ValueError(
+                "set either refit_interval_steps or refit_interval_fraction, not both"
+            )
+        if self.refit_interval_steps is None and self.refit_interval_fraction is None:
+            raise ValueError(
+                "one of refit_interval_steps or refit_interval_fraction is required"
+            )
+        if self.refit_interval_steps is not None and self.refit_interval_steps < 1:
+            raise ValueError("refit_interval_steps must be positive")
+        if self.refit_interval_fraction is not None and not (
+            0 < self.refit_interval_fraction <= 1
+        ):
+            raise ValueError("refit_interval_fraction must lie in (0, 1]")
         self.refit.validate()
+
+    def resolved_refit_interval(self, total_steps: int) -> int:
+        """Return the number of outer steps between successive NN refits.
+
+        A fractional interval is interpreted relative to the complete outer
+        time grid.  For example, ``0.10`` with 100 outer steps gives an
+        interval of 10 steps.  ``ceil`` prevents a requested fraction from
+        producing refits more frequently than its nominal spacing.
+        """
+
+        if total_steps < 1:
+            raise ValueError("total_steps must be positive")
+        if self.refit_interval_steps is not None:
+            return self.refit_interval_steps
+        if self.refit_interval_fraction is None:
+            raise RuntimeError("refit interval was not configured")
+        return max(1, int(np.ceil(self.refit_interval_fraction * total_steps)))
 
 
 @dataclass(frozen=True)
@@ -121,6 +157,7 @@ class RefitDTBResult:
     """Complete trajectory and diagnostics returned by :func:`run_refit_dtb`."""
 
     config: RefitDTBConfig
+    refit_interval_steps: int
     times: np.ndarray
     projection_times: np.ndarray
     refit_times: np.ndarray
@@ -130,7 +167,8 @@ class RefitDTBResult:
     initial_parameters: np.ndarray
     final_parameters: np.ndarray
     final_selected_indices: np.ndarray
-    selected_indices_history: np.ndarray
+    selected_indices_history: tuple[np.ndarray, ...]
+    projection_basis_size: np.ndarray
     dtb_snapshots: dict[float, np.ndarray]
     reference_snapshots: dict[float, np.ndarray]
     projection_error: np.ndarray
@@ -287,13 +325,14 @@ def run_refit_dtb(
 
     ``X_{k+1} = X_k + h J_{S_k}(theta_k,z) alpha_k``,
 
-    and then refits all network parameters using
+    At scheduled refit steps, all network parameters are refitted using
 
     ``theta_{k+1} = argmin_theta ||T_theta(z)-X_{k+1}||_F^2``.
 
     The physical particles are never overwritten by the fitted network output.
-    Consequently, the refit changes the tangent basis used at the next time
-    step without silently changing the particle dynamics.
+    Scheduled refit steps use the full parameter tangent for their projection.
+    Between refit events, ``theta`` remains fixed while the particle state and
+    a randomly selected tangent-coordinate subset continue to evolve.
     """
 
     config = config or RefitDTBConfig()
@@ -345,8 +384,10 @@ def run_refit_dtb(
     parameter_change_norm: list[float] = []
     refit_converged: list[bool] = []
     selected_history: list[np.ndarray] = []
+    projection_basis_size: list[int] = []
 
     total_steps = len(times) - 1
+    refit_interval_steps = config.resolved_refit_interval(total_steps)
     reports = _progress_steps(total_steps, config.progress_reports)
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -355,20 +396,33 @@ def run_refit_dtb(
     print(
         f"Refit DTB run: game={game.name}, device={device}, dtype={dtype}, "
         f"particles={config.particle_count}, steps={total_steps}, "
-        f"parameters={parameter_count}, subset_size={subset_size}, "
+        f"parameters={parameter_count}, random_subset_size={subset_size}, "
+        f"refit_projection_size={parameter_count}, "
+        f"refit_interval={refit_interval_steps} outer steps, "
         f"refit_max_steps={config.refit.maximum_steps}",
         flush=True,
     )
+    refit_times: list[float] = []
+    last_refit_particles = particles.detach().clone()
     for step in range(total_steps):
         current_time = float(times[step])
         outer_step = float(times[step + 1] - times[step])
-        selected = draw_tangent_subset(
-            parameter_count,
-            subset_size,
-            basis_generator,
-            device,
+        state_index = step + 1
+        refit_due = (
+            state_index % refit_interval_steps == 0
+            or state_index == total_steps
         )
+        if refit_due:
+            selected = torch.arange(parameter_count, device=device)
+        else:
+            selected = draw_tangent_subset(
+                parameter_count,
+                subset_size,
+                basis_generator,
+                device,
+            )
         selected_history.append(to_numpy(selected).copy())
+        projection_basis_size.append(int(selected.numel()))
         target_velocity = game.velocity(particles, current_time)
         if target_velocity.shape != particles.shape or not torch.isfinite(
             target_velocity
@@ -386,17 +440,32 @@ def run_refit_dtb(
             svd_rtol=config.svd_rtol,
         )
         next_particles = (particles + outer_step * projection.velocity).detach()
-        displacement_rms = paired_rms(next_particles, particles)
-        refit = refit_network_to_particles(
-            model,
-            labels,
-            next_particles,
-            displacement_rms=displacement_rms,
-            config=config.refit,
-        )
-        next_theta, next_structure = flat_parameters(model)
-        if next_structure != structure:
-            raise RuntimeError("model parameter structure changed during refitting")
+        refit = None
+        next_theta = theta
+        if refit_due:
+            displacement_since_refit = paired_rms(
+                next_particles,
+                last_refit_particles,
+            )
+            refit = refit_network_to_particles(
+                model,
+                labels,
+                next_particles,
+                displacement_rms=displacement_since_refit,
+                config=config.refit,
+            )
+            next_theta, next_structure = flat_parameters(model)
+            if next_structure != structure:
+                raise RuntimeError("model parameter structure changed during refitting")
+            refit_times.append(float(times[state_index]))
+            refit_rms_before.append(refit.rms_before)
+            refit_rms_after.append(refit.rms_after)
+            relative_refit_error.append(refit.relative_rms_after)
+            refit_tolerance.append(refit.stopping_tolerance)
+            refit_optimizer_steps.append(refit.optimizer_steps)
+            parameter_change_norm.append(refit.parameter_change_norm)
+            refit_converged.append(refit.converged)
+            last_refit_particles = next_particles.detach().clone()
 
         reference_particles = rk4_flow(
             game,
@@ -416,15 +485,6 @@ def run_refit_dtb(
             condition_number,
             retained_rank,
         )
-        refit_rms_before.append(refit.rms_before)
-        refit_rms_after.append(refit.rms_after)
-        relative_refit_error.append(refit.relative_rms_after)
-        refit_tolerance.append(refit.stopping_tolerance)
-        refit_optimizer_steps.append(refit.optimizer_steps)
-        parameter_change_norm.append(refit.parameter_change_norm)
-        refit_converged.append(refit.converged)
-
-        state_index = step + 1
         if state_index in snapshots_by_index:
             snapshot_time = snapshots_by_index[state_index]
             dtb_snapshots[snapshot_time] = to_numpy(particles).copy()
@@ -434,21 +494,21 @@ def run_refit_dtb(
                 torch.cuda.synchronize()
             elapsed = time.perf_counter() - started
             eta = elapsed * (total_steps - state_index) / state_index
+            refit_text = (
+                "refit=not scheduled"
+                if refit is None
+                else f"refit={refit.rms_after:.3e} | inner={refit.optimizer_steps}"
+            )
             print(
                 f"{100.0 * state_index / total_steps:5.1f}% | "
                 f"step {state_index}/{total_steps} | t={times[state_index]:g} | "
                 f"projection={projection.relative_residual.item():.3e} | "
-                f"refit={refit.rms_after:.3e} | inner={refit.optimizer_steps} | "
+                f"{refit_text} | "
                 f"elapsed={elapsed / 60:.1f} min | ETA={eta / 60:.1f} min",
                 flush=True,
             )
 
-    final_selected = draw_tangent_subset(
-        parameter_count,
-        subset_size,
-        basis_generator,
-        device,
-    )
+    final_selected = torch.arange(parameter_count, device=device)
     final_velocity = game.velocity(particles, float(times[-1]))
     final_projection = evaluate_dtb_projection(
         theta,
@@ -473,16 +533,18 @@ def run_refit_dtb(
 
     return RefitDTBResult(
         config=config,
+        refit_interval_steps=refit_interval_steps,
         times=times,
         projection_times=times[:-1].copy(),
-        refit_times=times[1:].copy(),
+        refit_times=np.asarray(refit_times),
         initial_particles=to_numpy(labels).copy(),
         final_particles=to_numpy(particles).copy(),
         reference_final_particles=to_numpy(reference_particles).copy(),
         initial_parameters=to_numpy(initial_theta).copy(),
         final_parameters=to_numpy(theta).copy(),
         final_selected_indices=to_numpy(final_selected).copy(),
-        selected_indices_history=np.stack(selected_history),
+        selected_indices_history=tuple(selected_history),
+        projection_basis_size=np.asarray(projection_basis_size),
         dtb_snapshots=dtb_snapshots,
         reference_snapshots=reference_snapshots,
         projection_error=np.asarray(projection_error),
