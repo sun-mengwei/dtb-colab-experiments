@@ -32,6 +32,11 @@ from .refit import (
     refit_network_to_particles,
     run_refit_dtb,
 )
+from .representation import (
+    RepresentationComparisonConfig,
+    RepresentationComparisonResult,
+    run_representation_comparison,
+)
 
 __all__ = [
     "BlockCournotGame",
@@ -50,6 +55,8 @@ __all__ = [
     "NetworkRefitDiagnostics",
     "RefitDTBConfig",
     "RefitDTBResult",
+    "RepresentationComparisonConfig",
+    "RepresentationComparisonResult",
     "MMNN",
     "MMNNLayer",
     "ResidualMLP",
@@ -58,6 +65,7 @@ __all__ = [
     "TangentMLP",
     "run_experiment",
     "run_refit_dtb",
+    "run_representation_comparison",
     "run_step_size_sweep",
     "rk4_flow",
     "rk4_step",

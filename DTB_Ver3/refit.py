@@ -392,15 +392,19 @@ def run_refit_dtb(
             state_index % refit_stride == 0
             or state_index == total_steps
         )
+        # Draw on every step so the ordinary-step subset stream stays aligned
+        # with a matched direct-parameter run. A scheduled refit step consumes
+        # its draw but deliberately replaces it with the full tangent basis.
+        random_selected = draw_tangent_subset(
+            parameter_count,
+            subset_size,
+            basis_generator,
+            device,
+        )
         if refit_due:
             selected = torch.arange(parameter_count, device=device)
         else:
-            selected = draw_tangent_subset(
-                parameter_count,
-                subset_size,
-                basis_generator,
-                device,
-            )
+            selected = random_selected
         selected_history.append(to_numpy(selected).copy())
         projection_basis_size.append(int(selected.numel()))
         target_velocity = game.velocity(particles, current_time)

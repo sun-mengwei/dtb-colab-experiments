@@ -260,6 +260,15 @@ reusable `run_refit_dtb` runner and records projection, fitting, parameter
 change, and paired RK4 diagnostics.  No parameter norm or parameter-change
 penalty is included in the refit objective.
 
+`notebooks/oscillatory_representation_direct_vs_periodic_refit.ipynb`
+compares the representation power learned by the direct parameter update and
+the periodic full-basis refit. Both methods use 10,000 matched training
+particles, the same residual-MMNN architecture and initialization, and the
+same ordinary-step random tangent schedule. Their full final tangent spaces
+are evaluated on 10,000 independent labels against the same refined-RK4
+oscillatory target for `omega/pi = (1, 4, 8, 16)`. The reusable matched sweep
+is implemented in `representation.py`.
+
 `reference_integrator="auto"` preserves the original behavior: Euler for a
 deterministic run and Euler--Maruyama for a stochastic run. Deterministic
 runs may choose `"rk4"`; `reference_step_size` then sets the maximum RK4
