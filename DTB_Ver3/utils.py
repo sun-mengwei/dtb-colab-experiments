@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 from pathlib import Path
@@ -71,6 +72,36 @@ def sample_initial_particles(
         uniform_high=uniform_high,
     )
     return particles
+
+
+def sample_uniform_box(
+    count: int,
+    dim: int,
+    *,
+    low: float,
+    high: float,
+    dtype: torch.dtype,
+    device: torch.device,
+    seed: int,
+) -> torch.Tensor:
+    r"""Draw ``z_i iid~Uniform([low, high]^dim)`` reproducibly.
+
+    The samples are generated on CPU with a private seed and transferred as a
+    complete tensor, so changing unrelated PyTorch random operations does not
+    alter this Monte Carlo cloud.
+    """
+
+    return sample_initial_particles(
+        count,
+        dim,
+        law="uniform",
+        smoothing_std=1.0,
+        dtype=dtype,
+        device=device,
+        generator=torch.Generator().manual_seed(int(seed)),
+        uniform_low=low,
+        uniform_high=high,
+    )
 
 
 def sample_initial_with_score(
@@ -169,6 +200,39 @@ def to_numpy(value) -> np.ndarray:
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().numpy()
     return np.asarray(value)
+
+
+def relative_l2_error(approximation: torch.Tensor, target: torch.Tensor) -> float:
+    r"""Return ``||approximation-target||_2 / ||target||_2``."""
+
+    if approximation.shape != target.shape:
+        raise ValueError("approximation and target must have equal shapes")
+    denominator = torch.linalg.vector_norm(target).clamp_min(
+        torch.finfo(target.dtype).tiny
+    )
+    return float(
+        (torch.linalg.vector_norm(approximation - target) / denominator).item()
+    )
+
+
+def paired_rms(first: torch.Tensor, second: torch.Tensor) -> float:
+    r"""Return ``sqrt(mean_i ||first_i-second_i||_2^2)``."""
+
+    if first.shape != second.shape or first.ndim != 2:
+        raise ValueError("paired clouds must have equal matrix shapes")
+    return float((first - second).square().sum(dim=1).mean().sqrt().item())
+
+
+def write_csv(path: str | Path, columns, rows) -> Path:
+    """Write a diagnostic table with one header row and return its path."""
+
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(columns)
+        writer.writerows(rows)
+    return target
 
 
 def write_json(path: str | Path, data: Mapping[str, object]) -> None:

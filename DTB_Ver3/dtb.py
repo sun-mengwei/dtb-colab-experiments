@@ -118,6 +118,65 @@ def subset_tangent_selection(
     return tangent, matrix
 
 
+def full_tangent_matrix(
+    model: nn.Module,
+    particles: torch.Tensor,
+    *,
+    chunk_size: int,
+) -> tuple[torch.Tensor, ParameterStructure, torch.Tensor, torch.Tensor]:
+    r"""Return the full sampled neural parameter Jacobian.
+
+    For trainable parameter vector ``theta`` and samples ``z_i``, this computes
+
+    ``J(theta, Z) = [D_theta T_theta(z_1); ...; D_theta T_theta(z_N)]``.
+
+    The returned tuple is ``(theta, structure, selected, J)`` where
+    ``selected = (0, ..., len(theta)-1)``.  Use ``J / sqrt(N)`` when the
+    normalized empirical inner product is required.
+    """
+
+    theta, structure = flat_parameters(model)
+    selected = torch.arange(theta.numel(), device=theta.device)
+    _, matrix = subset_tangent_selection(
+        theta,
+        selected,
+        particles,
+        model,
+        structure,
+        chunk_size=chunk_size,
+    )
+    return theta, structure, selected, matrix.detach()
+
+
+def active_tangent_columns(
+    matrix: torch.Tensor,
+    selected: torch.Tensor,
+    *,
+    relative_tolerance: float = 1e-13,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    r"""Remove structurally zero columns without changing ``range(J)``.
+
+    The retained coordinate set is
+    ``S = {j : ||J[:,j]|| > tolerance * max_l ||J[:,l]||}``.
+    Identity-initialized residual networks can contain exactly zero tangent
+    coordinates because a zero output layer screens earlier parameters.
+    """
+
+    if matrix.ndim != 2 or selected.ndim != 1:
+        raise ValueError("matrix must be two-dimensional and selected one-dimensional")
+    if matrix.shape[1] != selected.numel():
+        raise ValueError("matrix columns must match selected coordinates")
+    if relative_tolerance < 0:
+        raise ValueError("relative_tolerance must be nonnegative")
+    norms = torch.linalg.vector_norm(matrix, dim=0)
+    if norms.numel() == 0 or norms.max() <= 0:
+        raise FloatingPointError("the tangent matrix has no active columns")
+    keep = norms > relative_tolerance * norms.max()
+    if not keep.any():
+        raise FloatingPointError("the tangent matrix has no active columns")
+    return matrix[:, keep], selected[keep]
+
+
 @dataclass(frozen=True)
 class TangentProjection:
     """Result of projecting a physical velocity onto a DTB tangent space."""

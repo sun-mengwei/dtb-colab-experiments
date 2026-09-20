@@ -1010,6 +1010,75 @@ def _probability_flow_correction(
     return correction
 
 
+def rk4_step(
+    game: Game,
+    particles: torch.Tensor,
+    time_value: float,
+    step_size: float,
+) -> torch.Tensor:
+    r"""Advance ``dX/dt = b(X,t)`` by one classical RK4 step.
+
+    The update is ``X+ = X + h*(k1 + 2*k2 + 2*k3 + k4)/6`` with the standard
+    four Runge--Kutta stages evaluated through ``game.velocity``.
+    """
+
+    if step_size <= 0:
+        raise ValueError("step_size must be positive")
+    with torch.no_grad():
+        first = game.velocity(particles, time_value)
+        _validate_velocity(first, particles, "RK4 k1")
+        second = game.velocity(
+            particles + 0.5 * step_size * first,
+            time_value + 0.5 * step_size,
+        )
+        _validate_velocity(second, particles, "RK4 k2")
+        third = game.velocity(
+            particles + 0.5 * step_size * second,
+            time_value + 0.5 * step_size,
+        )
+        _validate_velocity(third, particles, "RK4 k3")
+        fourth = game.velocity(
+            particles + step_size * third,
+            time_value + step_size,
+        )
+        _validate_velocity(fourth, particles, "RK4 k4")
+        result = particles + (step_size / 6.0) * (
+            first + 2.0 * second + 2.0 * third + fourth
+        )
+        if not torch.isfinite(result).all():
+            raise FloatingPointError(f"RK4 state is nonfinite after t={time_value:g}")
+    return result.detach()
+
+
+def rk4_flow(
+    game: Game,
+    particles: torch.Tensor,
+    time_value: float,
+    interval: float,
+    *,
+    maximum_step: float,
+) -> torch.Tensor:
+    r"""Approximate the interval flow ``Phi_interval(particles)`` by RK4.
+
+    Equal substeps no larger than ``maximum_step`` are used, with the final
+    substep adjusted so the requested interval endpoint is reached exactly.
+    """
+
+    if interval <= 0 or maximum_step <= 0:
+        raise ValueError("interval and maximum_step must be positive")
+    substeps = max(1, int(np.ceil(interval / maximum_step - 1e-12)))
+    substep_size = interval / substeps
+    result = particles.detach().clone()
+    for substep in range(substeps):
+        result = rk4_step(
+            game,
+            result,
+            time_value + substep * substep_size,
+            substep_size,
+        )
+    return result
+
+
 def _advance_reference(
     game: Game,
     diffusion: Diffusion | None,
@@ -1022,6 +1091,14 @@ def _advance_reference(
     """Advance the selected reference method, optionally with refined substeps."""
 
     maximum_step = config.reference_step_size
+    if _reference_method(config) == "rk4":
+        return rk4_flow(
+            game,
+            particles,
+            time_value,
+            step_size,
+            maximum_step=step_size if maximum_step is None else maximum_step,
+        )
     substep_count = (
         1
         if maximum_step is None
@@ -1055,33 +1132,6 @@ def _advance_reference_one_step(
 
     with torch.no_grad():
         method = _reference_method(config)
-        if method == "rk4":
-            first = game.velocity(particles, time_value)
-            _validate_velocity(first, particles, "RK4 k1")
-            second = game.velocity(
-                particles + 0.5 * step_size * first,
-                time_value + 0.5 * step_size,
-            )
-            _validate_velocity(second, particles, "RK4 k2")
-            third = game.velocity(
-                particles + 0.5 * step_size * second,
-                time_value + 0.5 * step_size,
-            )
-            _validate_velocity(third, particles, "RK4 k3")
-            fourth = game.velocity(
-                particles + step_size * third,
-                time_value + step_size,
-            )
-            _validate_velocity(fourth, particles, "RK4 k4")
-            next_particles = particles + (step_size / 6.0) * (
-                first + 2.0 * second + 2.0 * third + fourth
-            )
-            if not torch.isfinite(next_particles).all():
-                raise FloatingPointError(
-                    f"RK4 state is nonfinite after t={time_value:g}"
-                )
-            return next_particles.detach()
-
         drift = game.velocity(particles, time_value)
         _validate_velocity(drift, particles, "reference drift")
         increment = step_size * drift

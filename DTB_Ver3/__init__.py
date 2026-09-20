@@ -7,7 +7,10 @@ from .experiment import (
     StepSizeSweepResult,
     run_experiment,
     run_step_size_sweep,
+    rk4_flow,
+    rk4_step,
 )
+from .diagnostics import projection_metrics, run_oscillatory_dynamic_diagnostic
 from .games import (
     BlockCournotGame,
     ConstantDiffusion,
@@ -42,4 +45,8 @@ __all__ = [
     "TangentMLP",
     "run_experiment",
     "run_step_size_sweep",
+    "rk4_flow",
+    "rk4_step",
+    "projection_metrics",
+    "run_oscillatory_dynamic_diagnostic",
 ]
