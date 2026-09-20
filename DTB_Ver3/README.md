@@ -274,6 +274,15 @@ error, full-basis coefficient norm, conditioning, and paired trajectory RMS,
 then plots final direct, periodic-refit, and RK4 particle clouds for every
 frequency.
 
+`notebooks/oscillatory_4pi_dtb_vs_direct_parameter_map.ipynb` fixes
+`omega=4*pi` and isolates two state-update interpretations using the same
+MMNN, particles, random tangent subsets, and RK4 reference. The packaged
+particle-Euler DTB runner accumulates `X[k+1] = X[k] + h J[k] alpha[k]`; the
+direct neural-map method applies the same selected parameter update and then
+sets `X[k+1] = T_{theta[k+1]}(z)`. The notebook compares matched particle
+snapshots, coefficient-norm and relative-projection-error trajectories, and
+paired RMS against RK4.
+
 `reference_integrator="auto"` preserves the original behavior: Euler for a
 deterministic run and Euler--Maruyama for a stochastic run. Deterministic
 runs may choose `"rk4"`; `reference_step_size` then sets the maximum RK4
