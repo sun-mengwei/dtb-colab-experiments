@@ -96,6 +96,8 @@ class RepresentationComparisonResult:
     columns: tuple[str, ...]
     records: tuple[tuple[object, ...], ...]
     parameter_count: int
+    final_particle_clouds: dict[tuple[float, int, str], np.ndarray]
+    rk4_final_particle_clouds: dict[tuple[float, int], np.ndarray]
 
 
 def _make_matched_model(
@@ -212,6 +214,8 @@ def run_representation_comparison(
         "final_refit_rms",
     )
     rows: list[tuple[object, ...]] = []
+    final_particle_clouds: dict[tuple[float, int, str], np.ndarray] = {}
+    rk4_final_particle_clouds: dict[tuple[float, int], np.ndarray] = {}
     parameter_count: int | None = None
 
     for multiplier in config.omega_multipliers:
@@ -319,6 +323,13 @@ def run_representation_comparison(
                 periodic.initial_parameters,
             ):
                 raise RuntimeError("matched methods did not receive the same MMNN")
+            if direct.reference_final_particles is None:
+                raise RuntimeError("direct method did not return its RK4 reference")
+            if not np.array_equal(
+                direct.reference_final_particles,
+                periodic.reference_final_particles,
+            ):
+                raise RuntimeError("matched methods did not receive the same RK4 reference")
             for step_index, periodic_selected in enumerate(
                 periodic.selected_indices_history
             ):
@@ -329,6 +340,17 @@ def run_representation_comparison(
                     raise RuntimeError(
                         "ordinary-step random tangent schedules are not aligned"
                     )
+
+            cloud_key = (float(multiplier), int(seed))
+            final_particle_clouds[(*cloud_key, "direct")] = (
+                direct.dtb_final_particles.copy()
+            )
+            final_particle_clouds[(*cloud_key, "periodic_refit")] = (
+                periodic.final_particles.copy()
+            )
+            rk4_final_particle_clouds[cloud_key] = (
+                direct.reference_final_particles.copy()
+            )
 
             for method, model, final_parameters, trajectory_rms, elapsed, events, fit in (
                 (
@@ -393,4 +415,6 @@ def run_representation_comparison(
         columns=columns,
         records=tuple(rows),
         parameter_count=parameter_count,
+        final_particle_clouds=final_particle_clouds,
+        rk4_final_particle_clouds=rk4_final_particle_clouds,
     )

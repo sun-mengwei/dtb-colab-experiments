@@ -267,7 +267,10 @@ particles, the same residual-MMNN architecture and initialization, and the
 same ordinary-step random tangent schedule. Their full final tangent spaces
 are evaluated on 10,000 independent labels against the same refined-RK4
 oscillatory target for `omega/pi = (1, 4, 8, 16)`. The reusable matched sweep
-is implemented in `representation.py`.
+is implemented in `representation.py`. The comparison result retains the
+paired final direct, periodic-refit, and RK4 particle clouds; the notebook
+saves them to `final_particle_clouds.npz` and plots a three-column final-state
+comparison for a selected matched seed.
 
 `reference_integrator="auto"` preserves the original behavior: Euler for a
 deterministic run and Euler--Maruyama for a stochastic run. Deterministic
