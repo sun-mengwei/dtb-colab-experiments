@@ -243,6 +243,39 @@ def project_velocity(
     )
 
 
+def evaluate_dtb_projection(
+    theta: torch.Tensor,
+    selected: torch.Tensor,
+    tangent_inputs: torch.Tensor,
+    target_velocity: torch.Tensor,
+    model: nn.Module,
+    structure: ParameterStructure,
+    *,
+    chunk_size: int,
+    svd_rtol: float,
+) -> TangentProjection:
+    r"""Evaluate the DTB least-squares projection at one state.
+
+    This constructs ``J_S(theta, tangent_inputs)`` and solves
+
+    ``alpha = argmin_a ||J_S(theta, tangent_inputs) a - target_velocity||_2``.
+
+    Unlike :func:`dtb_step`, this function does not advance either ``theta``
+    or the particles.  It is therefore suitable for a fresh diagnostic at the
+    final state after all DTB updates have been completed.
+    """
+
+    _, tangent_matrix = subset_tangent_selection(
+        theta,
+        selected,
+        tangent_inputs,
+        model,
+        structure,
+        chunk_size=chunk_size,
+    )
+    return project_velocity(tangent_matrix, target_velocity, rtol=svd_rtol)
+
+
 def dtb_step(
     theta: torch.Tensor,
     selected: torch.Tensor,
@@ -274,15 +307,16 @@ def dtb_step(
     basis_inputs = particles if tangent_inputs is None else tangent_inputs
     if basis_inputs.shape != particles.shape:
         raise ValueError("tangent_inputs must have the particle shape")
-    _, tangent_matrix = subset_tangent_selection(
+    projection = evaluate_dtb_projection(
         theta,
         selected,
         basis_inputs,
+        target_velocity,
         model,
         structure,
         chunk_size=chunk_size,
+        svd_rtol=svd_rtol,
     )
-    projection = project_velocity(tangent_matrix, target_velocity, rtol=svd_rtol)
     next_particles = (particles + step_size * projection.velocity).detach()
     next_theta = theta.detach().clone()
     next_theta[selected] += step_size * projection.alpha.detach()

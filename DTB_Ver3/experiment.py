@@ -25,6 +25,7 @@ import torch.nn as nn
 from .dtb import (
     advance_score,
     dtb_step,
+    evaluate_dtb_projection,
     evaluate_model,
     flat_parameters,
     tangent_spatial_terms,
@@ -214,6 +215,11 @@ class ExperimentResult:
     diffusion_correction_rms: np.ndarray
     selected_indices: np.ndarray
     selected_indices_history: np.ndarray
+    final_projection_error: float
+    final_relative_projection_error: float
+    final_alpha_norm: float
+    final_projection_condition: float
+    final_projection_rank: int
     elapsed_seconds: float
     final_mean_distance: float | None
     final_paired_rms: float | None
@@ -248,11 +254,11 @@ class ExperimentResult:
             "elapsed_seconds": self.elapsed_seconds,
             "final_mean_distance": self.final_mean_distance,
             "final_paired_rms": self.final_paired_rms,
-            "final_projection_error": float(self.projection_error[-1]),
-            "final_relative_projection_error": float(
-                self.relative_projection_error[-1]
-            ),
-            "final_alpha_norm": float(self.alpha_norm[-1]),
+            "final_projection_error": self.final_projection_error,
+            "final_relative_projection_error": self.final_relative_projection_error,
+            "final_alpha_norm": self.final_alpha_norm,
+            "final_projection_condition": self.final_projection_condition,
+            "final_projection_rank": self.final_projection_rank,
             "final_trajectory_rms_error": (
                 None
                 if self.trajectory_rms_error.size == 0
@@ -644,6 +650,33 @@ class DTBExperiment:
 
         if device.type == "cuda":
             torch.cuda.synchronize()
+        if selected is None:
+            raise RuntimeError("tangent subset was not initialized")
+        final_time = float(times[-1])
+        final_drift = self.game.velocity(particles, final_time)
+        _validate_velocity(final_drift, particles, "final game drift")
+        if config.stochastic:
+            if score is None or self.diffusion is None:
+                raise RuntimeError("stochastic final state was not initialized")
+            final_target = final_drift - _probability_flow_correction(
+                self.diffusion,
+                particles,
+                score,
+                final_time,
+            )
+        else:
+            final_target = final_drift
+        final_basis_inputs = particles if tangent_labels is None else tangent_labels
+        final_projection = evaluate_dtb_projection(
+            theta,
+            selected,
+            final_basis_inputs,
+            final_target,
+            model,
+            structure,
+            chunk_size=config.jacobian_chunk,
+            svd_rtol=config.svd_rtol,
+        )
         reference_final = (
             None if reference_particles is None else reference_particles.detach()
         )
@@ -694,6 +727,15 @@ class DTBExperiment:
             diffusion_correction_rms=np.asarray(diffusion_rms),
             selected_indices=to_numpy(selected).copy(),
             selected_indices_history=np.stack(selected_history),
+            final_projection_error=float(final_projection.rms_residual.item()),
+            final_relative_projection_error=float(
+                final_projection.relative_residual.item()
+            ),
+            final_alpha_norm=float(
+                torch.linalg.vector_norm(final_projection.alpha).item()
+            ),
+            final_projection_condition=final_projection.condition_number,
+            final_projection_rank=final_projection.retained_rank,
             elapsed_seconds=elapsed_seconds,
             final_mean_distance=final_mean_distance,
             final_paired_rms=final_paired_rms,
@@ -870,7 +912,7 @@ def run_step_size_sweep(
                     projections=wasserstein_projections,
                     seed=config.seed,
                 ),
-                float(result.projection_error[-1]),
+                result.final_projection_error,
                 result.elapsed_seconds,
             ]
         )
@@ -905,7 +947,7 @@ def run_step_size_sweep(
         comments="",
     )
     final_relative_projection_error = np.asarray(
-        [runs[step_size].relative_projection_error[-1] for step_size in values],
+        [runs[step_size].final_relative_projection_error for step_size in values],
         dtype=float,
     )
     if not np.isfinite(final_relative_projection_error).all():
@@ -916,7 +958,7 @@ def run_step_size_sweep(
         root / "relative_projection_error_vs_step_size.csv",
         np.column_stack((values, final_relative_projection_error)),
         delimiter=",",
-        header="step_size,last_step_relative_projection_error",
+        header="step_size,final_state_relative_projection_error",
         comments="",
     )
     write_json(
@@ -935,7 +977,8 @@ def run_step_size_sweep(
                 "sqrt(mean_i(||X_DTB_i(T)-X_reference_i(T)||_2^2))"
             ),
             "relative_projection_definition": (
-                "||J_k alpha_k-g_k||_2/||g_k||_2 at the last DTB step"
+                "||J(theta_T) alpha_T-g(X_T,T)||_2/||g(X_T,T)||_2, "
+                "recomputed after the final DTB update"
             ),
             "columns": list(columns),
         },

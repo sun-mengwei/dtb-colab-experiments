@@ -11,6 +11,7 @@ from .experiment import (
     rk4_step,
 )
 from .diagnostics import projection_metrics, run_oscillatory_dynamic_diagnostic
+from .dtb import evaluate_dtb_projection
 from .games import (
     BlockCournotGame,
     ConstantDiffusion,
@@ -49,4 +50,5 @@ __all__ = [
     "rk4_step",
     "projection_metrics",
     "run_oscillatory_dynamic_diagnostic",
+    "evaluate_dtb_projection",
 ]
