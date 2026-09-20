@@ -243,9 +243,9 @@ multiple seeds.
 `notebooks/oscillatory_4pi_refit_mmnn_dtb.ipynb` uses the same non-potential
 game, random tangent-coordinate reselection, projected particle Euler step,
 and refined RK4 reference, but replaces the parameter Euler step with an
-unregularized supervised refit.  Refit frequency can be specified either as
-an explicit number of outer steps or as a fraction of the complete time grid;
-the notebook uses a fraction of `0.10`. Ordinary steps use the configured
+unregularized supervised refit. Refit frequency is specified as a fraction of
+the complete outer time grid; the notebook uses `refit_interval_fraction=0.10`.
+Ordinary steps use the configured
 random tangent subset. Scheduled refit steps use all trainable MMNN tangent
 coordinates for the velocity projection, advance the physical particles, and
 then warm-start all MMNN parameters from their current values to solve

@@ -79,8 +79,7 @@ class RefitDTBConfig:
     dtype: str = "float64"
     device: str = "auto"
     progress_reports: int = 5
-    refit_interval_steps: int | None = 1
-    refit_interval_fraction: float | None = None
+    refit_interval_fraction: float = 0.10
     refit: NetworkRefitConfig = NetworkRefitConfig()
 
     def validate(self) -> None:
@@ -102,22 +101,7 @@ class RefitDTBConfig:
             raise ValueError("svd_rtol must lie in [0, 1)")
         if self.progress_reports < 0:
             raise ValueError("progress_reports cannot be negative")
-        if (
-            self.refit_interval_steps is not None
-            and self.refit_interval_fraction is not None
-        ):
-            raise ValueError(
-                "set either refit_interval_steps or refit_interval_fraction, not both"
-            )
-        if self.refit_interval_steps is None and self.refit_interval_fraction is None:
-            raise ValueError(
-                "one of refit_interval_steps or refit_interval_fraction is required"
-            )
-        if self.refit_interval_steps is not None and self.refit_interval_steps < 1:
-            raise ValueError("refit_interval_steps must be positive")
-        if self.refit_interval_fraction is not None and not (
-            0 < self.refit_interval_fraction <= 1
-        ):
+        if not 0 < self.refit_interval_fraction <= 1:
             raise ValueError("refit_interval_fraction must lie in (0, 1]")
         self.refit.validate()
 
@@ -132,10 +116,6 @@ class RefitDTBConfig:
 
         if total_steps < 1:
             raise ValueError("total_steps must be positive")
-        if self.refit_interval_steps is not None:
-            return self.refit_interval_steps
-        if self.refit_interval_fraction is None:
-            raise RuntimeError("refit interval was not configured")
         return max(1, int(np.ceil(self.refit_interval_fraction * total_steps)))
 
 
@@ -157,7 +137,7 @@ class RefitDTBResult:
     """Complete trajectory and diagnostics returned by :func:`run_refit_dtb`."""
 
     config: RefitDTBConfig
-    refit_interval_steps: int
+    refit_stride: int
     times: np.ndarray
     projection_times: np.ndarray
     refit_times: np.ndarray
@@ -387,7 +367,7 @@ def run_refit_dtb(
     projection_basis_size: list[int] = []
 
     total_steps = len(times) - 1
-    refit_interval_steps = config.resolved_refit_interval(total_steps)
+    refit_stride = config.resolved_refit_interval(total_steps)
     reports = _progress_steps(total_steps, config.progress_reports)
     if device.type == "cuda":
         torch.cuda.synchronize()
@@ -398,7 +378,7 @@ def run_refit_dtb(
         f"particles={config.particle_count}, steps={total_steps}, "
         f"parameters={parameter_count}, random_subset_size={subset_size}, "
         f"refit_projection_size={parameter_count}, "
-        f"refit_interval={refit_interval_steps} outer steps, "
+        f"refit_stride={refit_stride} outer steps, "
         f"refit_max_steps={config.refit.maximum_steps}",
         flush=True,
     )
@@ -409,7 +389,7 @@ def run_refit_dtb(
         outer_step = float(times[step + 1] - times[step])
         state_index = step + 1
         refit_due = (
-            state_index % refit_interval_steps == 0
+            state_index % refit_stride == 0
             or state_index == total_steps
         )
         if refit_due:
@@ -533,7 +513,7 @@ def run_refit_dtb(
 
     return RefitDTBResult(
         config=config,
-        refit_interval_steps=refit_interval_steps,
+        refit_stride=refit_stride,
         times=times,
         projection_times=times[:-1].copy(),
         refit_times=np.asarray(refit_times),
