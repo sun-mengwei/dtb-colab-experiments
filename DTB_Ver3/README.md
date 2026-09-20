@@ -240,6 +240,22 @@ independent-validation Monte Carlo sweep over sample size, reporting
 `E_N`, `E_sample`, `E_G`, and `E_c` with means and standard deviations over
 multiple seeds.
 
+`notebooks/oscillatory_4pi_refit_mmnn_dtb.ipynb` uses the same non-potential
+game, random tangent-coordinate reselection, projected particle Euler step,
+and refined RK4 reference, but replaces the parameter Euler step with an
+unregularized supervised refit.  After advancing the physical particles, it
+warm-starts all MMNN parameters from their current values and solves
+
+```text
+theta[k+1] = argmin_theta mean_i ||T_theta(z_i) - X_i[k+1]||_2^2.
+```
+
+The particle state is not replaced by the network prediction.  The refit only
+adapts the tangent basis for the next projection.  `refit.py` provides the
+reusable `run_refit_dtb` runner and records projection, fitting, parameter
+change, and paired RK4 diagnostics.  No parameter norm or parameter-change
+penalty is included in the refit objective.
+
 `reference_integrator="auto"` preserves the original behavior: Euler for a
 deterministic run and Euler--Maruyama for a stochastic run. Deterministic
 runs may choose `"rk4"`; `reference_step_size` then sets the maximum RK4

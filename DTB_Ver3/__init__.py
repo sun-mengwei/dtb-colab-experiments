@@ -24,6 +24,14 @@ from .games import (
     OscillatoryNonpotentialGame,
 )
 from .models import MMNN, MMNNLayer, ResidualMLP, ResidualMMNN, TangentMLP
+from .refit import (
+    NetworkRefitConfig,
+    NetworkRefitDiagnostics,
+    RefitDTBConfig,
+    RefitDTBResult,
+    refit_network_to_particles,
+    run_refit_dtb,
+)
 
 __all__ = [
     "BlockCournotGame",
@@ -38,6 +46,10 @@ __all__ = [
     "Game",
     "OscillatoryGame",
     "OscillatoryNonpotentialGame",
+    "NetworkRefitConfig",
+    "NetworkRefitDiagnostics",
+    "RefitDTBConfig",
+    "RefitDTBResult",
     "MMNN",
     "MMNNLayer",
     "ResidualMLP",
@@ -45,10 +57,12 @@ __all__ = [
     "StepSizeSweepResult",
     "TangentMLP",
     "run_experiment",
+    "run_refit_dtb",
     "run_step_size_sweep",
     "rk4_flow",
     "rk4_step",
     "projection_metrics",
     "run_oscillatory_dynamic_diagnostic",
     "evaluate_dtb_projection",
+    "refit_network_to_particles",
 ]
