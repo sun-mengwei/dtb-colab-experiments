@@ -232,8 +232,10 @@ than inherited from the last update at `T-h`.
 `notebooks/oscillatory_4pi_basic_dtb_sample_size_sweep.ipynb` fixes
 `omega=4*pi` and provides a shorter two-part study.  The first part runs the
 adaptive random-subset DTB trajectory and plots the coefficient norm,
-projection errors, and refined-RK4 trajectory error against time.  The second
-part freezes the learned final basis `(theta[T], S[T])` and performs an
+projection errors, and refined-RK4 trajectory error against time.  It also
+plots matched DTB and RK4 point-cloud snapshots in two aligned rows at every
+requested snapshot time.  The second part freezes the learned final basis
+`(theta[T], S[T])` and performs an
 independent-validation Monte Carlo sweep over sample size, reporting
 `E_N`, `E_sample`, `E_G`, and `E_c` with means and standard deviations over
 multiple seeds.
